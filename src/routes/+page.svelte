@@ -42,8 +42,6 @@
 		teamResults.update((r) => { const u = { ...r }; delete u[$currentSessionId!]; return u; });
 	}
 
-	$: sortedSessions = [...$sessions].sort((a, b) => b.date.localeCompare(a.date));
-
 	$: checkinUrl = browser && $currentSessionId
 		? `${window.location.origin}/checkin/${$currentSessionId}` : '';
 	$: qrUrl = checkinUrl
