@@ -60,6 +60,36 @@ export const currentTeamResult = derived(
 );
 
 // ============================================================
+// 個人プロフィール（このデバイスを使うユーザー）
+// ============================================================
+
+export const currentUserId = persist<string | null>('sm_current_user_id', null);
+
+export const currentUser = derived(
+	[members, currentUserId],
+	([$m, $id]) => ($id ? ($m.find((m) => m.id === $id) ?? null) : null)
+);
+
+/** 自分のチェックイン履歴 */
+export const myCheckIns = derived(
+	[allCheckIns, currentUserId],
+	([$all, $id]) => ($id ? $all.filter((ci) => ci.memberId === $id) : [])
+);
+
+/** 自分が参加したセッションIDのSet */
+export const mySessionIds = derived(
+	myCheckIns,
+	($my) => new Set($my.map((ci) => ci.sessionId))
+);
+
+/** 自分が参加したセッション（新しい順） */
+export const mySessions = derived(
+	[sessions, mySessionIds],
+	([$s, $ids]) =>
+		$s.filter((s) => $ids.has(s.id)).sort((a, b) => b.date.localeCompare(a.date))
+);
+
+// ============================================================
 // ユーティリティ
 // ============================================================
 

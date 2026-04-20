@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { sessions, currentSessionId, allCheckIns } from '$lib/stores';
+	import { sessions, currentSessionId, allCheckIns, mySessions, myCheckIns } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	function formatDate(d: string) {
@@ -14,14 +14,15 @@
 		sessions.update((l) => l.filter((s) => s.id !== id));
 		if ($currentSessionId === id) currentSessionId.set(null);
 	}
-	$: sorted = [...$sessions].sort((a, b) => b.date.localeCompare(a.date));
+	// 自分が参加したセッションのみ表示（mySessions は新しい順）
+	$: sorted = $mySessions;
 </script>
 
 <div class="page">
 	<div class="page-head">
 		<div>
 			<h1 class="page-title">セッション</h1>
-			<p class="page-sub">全 {$sessions.length} 件</p>
+			<p class="page-sub">参加済み {sorted.length} 件</p>
 		</div>
 		<button class="btn btn-primary" on:click={() => goto('/sessions/new')}>作成</button>
 	</div>
@@ -31,8 +32,8 @@
 			<svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
 				<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
 			</svg>
-			<p class="empty-title">セッションがありません</p>
-			<p class="empty-sub">今日のイベントを作成しましょう</p>
+			<p class="empty-title">参加したセッションがありません</p>
+			<p class="empty-sub">QRコードをスキャンしてイベントに参加しましょう</p>
 			<button class="btn btn-primary" style="margin-top:12px" on:click={() => goto('/sessions/new')}>セッションを作成</button>
 		</div>
 	{:else}

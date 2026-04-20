@@ -3,11 +3,20 @@
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { currentUserId } from '$lib/stores';
 
 	$: p = $page.url.pathname;
 	$: isCheckinPage = p.startsWith('/checkin');
 	$: isScanPage    = p.startsWith('/scan');
-	$: showChrome    = !isCheckinPage && !isScanPage;
+	$: isOnboarding  = p.startsWith('/onboarding');
+	$: showChrome    = !isCheckinPage && !isScanPage && !isOnboarding;
+
+	// 未登録ならオンボーディングへリダイレクト
+	$: if (browser && $currentUserId === null && !isOnboarding) {
+		const next = p !== '/' ? encodeURIComponent(p + $page.url.search) : '';
+		goto(next ? `/onboarding?next=${next}` : '/onboarding');
+	}
 
 	// 開発中は古いService Workerをアンレジスト（干渉防止）
 	onMount(() => {

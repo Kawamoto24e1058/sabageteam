@@ -1,8 +1,9 @@
 <script lang="ts">
 	import {
-		members, sessions, currentSession, currentSessionId,
+		members, currentSession, currentSessionId,
 		currentCheckIns, currentCheckedInCount, currentOwnGearCount, currentRentalGearCount,
-		currentTeamResult, participationCounts, teamResults, numTeams
+		currentTeamResult, participationCounts, teamResults, numTeams,
+		currentUser, mySessions, myCheckIns
 	} from '$lib/stores';
 	import { assignTeams } from '$lib/teamAssignment';
 	import { TEAM_CONFIGS } from '$lib/teamColors';
@@ -79,9 +80,18 @@
 ════════════════════════════════════════ -->
 {#if !$currentSession}
 <div class="page">
-	<div class="page-head">
-		<h1 class="page-title">ホーム</h1>
-		<p class="page-sub">今日のセッションを選択してください</p>
+	<!-- 挨拶 -->
+	<div class="greeting-card">
+		<div class="greeting-avatar">{$currentUser?.name[0] ?? '?'}</div>
+		<div>
+			<div class="greeting-name">{$currentUser?.name ?? ''}</div>
+			<div class="greeting-meta">
+				{$currentUser?.studentId ?? ''}
+				{#if $myCheckIns.length > 0}
+					· 累計 {$myCheckIns.length} 回参加
+				{/if}
+			</div>
+		</div>
 	</div>
 
 	<!-- 新規作成 -->
@@ -98,11 +108,12 @@
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
 	</button>
 
-	<!-- 過去セッション -->
-	{#if sortedSessions.length > 0}
+	<!-- 自分の参加セッション -->
+	{#if $mySessions.length > 0}
 		<div class="list-section">
-			<div class="section-title">過去のセッション</div>
-			{#each sortedSessions.slice(0, 5) as s}
+			<div class="section-title">参加したイベント</div>
+			{#each $mySessions.slice(0, 5) as s}
+				{@const myCi = $myCheckIns.find(ci => ci.sessionId === s.id)}
 				<button class="row-item" on:click={() => { currentSessionId.set(s.id); }}>
 					<div class="row-icon">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
@@ -113,9 +124,22 @@
 						<span class="row-title">{s.title}</span>
 						<span class="row-sub">{formatDate(s.date)}{s.location ? ` · ${s.location}` : ''}</span>
 					</div>
-					<span class="row-action">選択</span>
+					{#if myCi}
+						<span class="gear-badge {myCi.gearType === 'own' ? 'gear-own' : 'gear-rental'}">
+							{myCi.gearType === 'own' ? '自前' : 'レンタル'}
+						</span>
+					{/if}
 				</button>
 			{/each}
+		</div>
+	{:else}
+		<div class="card empty-hint">
+			<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:8px">
+				<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+			</svg>
+			<p class="empty-title">まだ参加したイベントはありません</p>
+			<p class="empty-sub">QRコードをスキャンしてイベントに参加しましょう</p>
+			<button class="btn btn-primary" style="margin-top:12px" on:click={() => goto('/scan')}>QRをスキャン</button>
 		</div>
 	{/if}
 </div>
@@ -288,9 +312,26 @@
 
 <style>
 .page { display:flex; flex-direction:column; gap:12px; }
-.page-head { margin-bottom:4px; }
-.page-title { font-size:22px; font-weight:700; color:#0f172a; margin:0 0 2px; }
-.page-sub   { font-size:13px; color:#94a3b8; margin:0; }
+
+/* 挨拶カード */
+.greeting-card {
+	background:#fff; border:1px solid #e2e8f0; border-radius:12px;
+	padding:14px 16px; display:flex; align-items:center; gap:12px;
+	box-shadow:0 1px 3px rgba(0,0,0,.05);
+}
+.greeting-avatar {
+	width:44px; height:44px; border-radius:12px; background:#eff6ff;
+	color:#2563eb; display:flex; align-items:center; justify-content:center;
+	font-weight:700; font-size:18px; flex-shrink:0;
+}
+.greeting-name { font-size:15px; font-weight:700; color:#0f172a; }
+.greeting-meta { font-size:12px; color:#94a3b8; margin-top:2px; }
+
+/* 空状態 */
+.empty-hint {
+	display:flex; flex-direction:column; align-items:center;
+	padding:32px 16px; text-align:center; gap:4px;
+}
 
 /* 新規作成ボタン */
 .create-btn {
@@ -322,6 +363,9 @@
 .row-title { font-size:13px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .row-sub   { font-size:11px; color:#94a3b8; }
 .row-action { font-size:12px; font-weight:600; color:#2563eb; flex-shrink:0; }
+.gear-badge { font-size:10px; font-weight:600; padding:2px 8px; border-radius:99px; flex-shrink:0; }
+.gear-own    { background:#dbeafe; color:#1e40af; }
+.gear-rental { background:#fef3c7; color:#92400e; }
 
 /* セッションバナー */
 .session-banner {
