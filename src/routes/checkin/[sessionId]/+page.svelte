@@ -39,6 +39,11 @@
 		if (n >= 5)  return '経験者';
 		return '';
 	}
+
+	// テンプレート内でTypeScriptのas型アサーションが使えないためラッパー関数を用意
+	function setGear(val: string) {
+		gear = val as 'own' | 'rental';
+	}
 </script>
 
 <svelte:head><title>{session?.title ?? 'チェックイン'} | SabageManager</title></svelte:head>
@@ -120,7 +125,7 @@
 							class="gear-opt"
 							class:gear-sel={gear === opt.val}
 							style="--sel-color:{opt.color}; --sel-bg:{opt.bg}"
-							on:click={() => (gear = opt.val as 'own' | 'rental')}
+							on:click={() => setGear(opt.val)}
 						>
 							<span class="gear-label">{opt.label}</span>
 							<span class="gear-sub">{opt.sub}</span>
