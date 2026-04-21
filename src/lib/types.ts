@@ -19,6 +19,7 @@ export interface Session {
 	date: string;
 	location?: string;
 	createdAt: string;
+	createdBy?: string; // 作成者の userId
 }
 
 export interface CheckIn {

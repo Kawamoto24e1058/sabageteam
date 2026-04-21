@@ -122,10 +122,13 @@ export const myCheckIns = derived(
 
 export const mySessionIds = derived(myCheckIns, ($my) => new Set($my.map((ci) => ci.sessionId)));
 
+// 参加済み OR 自分が作成したセッション（両方を含む）
 export const mySessions = derived(
-	[sessions, mySessionIds],
-	([$s, $ids]) =>
-		$s.filter((s) => $ids.has(s.id)).sort((a, b) => b.date.localeCompare(a.date))
+	[sessions, mySessionIds, currentUserId],
+	([$s, $ids, $uid]) =>
+		$s
+			.filter((s) => $ids.has(s.id) || (!!$uid && s.createdBy === $uid))
+			.sort((a, b) => b.date.localeCompare(a.date))
 );
 
 // ============================================================

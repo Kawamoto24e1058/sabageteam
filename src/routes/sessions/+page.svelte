@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentSessionId, allCheckIns, mySessions, deleteSession } from '$lib/stores';
+	import { currentSessionId, sessions, allCheckIns, currentUserId, deleteSession } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	function formatDate(d: string) {
@@ -14,15 +14,20 @@
 		await deleteSession(id);
 		if ($currentSessionId === id) currentSessionId.set(null);
 	}
-	// 自分が参加したセッションのみ表示（mySessions は新しい順）
-	$: sorted = $mySessions;
+	// 全セッションを新しい順に表示
+	$: sorted = [...$sessions].sort((a, b) => b.date.localeCompare(a.date));
+
+	// 自分がチェックイン済みのセッションID集合
+	$: myCheckedSessionIds = new Set(
+		$allCheckIns.filter(ci => ci.memberId === $currentUserId).map(ci => ci.sessionId)
+	);
 </script>
 
 <div class="page">
 	<div class="page-head">
 		<div>
 			<h1 class="page-title">セッション</h1>
-			<p class="page-sub">参加済み {sorted.length} 件</p>
+			<p class="page-sub">全 {sorted.length} 件</p>
 		</div>
 		<button class="btn btn-primary" on:click={() => goto('/sessions/new')}>作成</button>
 	</div>
@@ -32,8 +37,8 @@
 			<svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
 				<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
 			</svg>
-			<p class="empty-title">参加したセッションがありません</p>
-			<p class="empty-sub">QRコードをスキャンしてイベントに参加しましょう</p>
+			<p class="empty-title">セッションがありません</p>
+			<p class="empty-sub">新しいセッションを作成しましょう</p>
 			<button class="btn btn-primary" style="margin-top:12px" on:click={() => goto('/sessions/new')}>セッションを作成</button>
 		</div>
 	{:else}
@@ -46,6 +51,7 @@
 							<div class="s-name-row">
 								<span class="s-name">{s.title}</span>
 								{#if active}<span class="badge badge-blue">開催中</span>{/if}
+								{#if myCheckedSessionIds.has(s.id)}<span class="badge badge-green">参加済み</span>{/if}
 							</div>
 							<div class="s-meta">{formatDate(s.date)}{s.location ? ` · ${s.location}` : ''}</div>
 							<div class="s-count">{ciCount(s.id)}名チェックイン</div>
@@ -98,4 +104,8 @@
 	transition:background .12s, color .12s;
 }
 .del-btn:hover { background:#fee2e2; color:#ef4444; }
+
+.badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:99px; }
+.badge-blue  { background:#dbeafe; color:#1d4ed8; }
+.badge-green { background:#dcfce7; color:#15803d; }
 </style>
