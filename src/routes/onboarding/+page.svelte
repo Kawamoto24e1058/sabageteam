@@ -42,6 +42,9 @@
 	let socialError     = '';
 	let socialLoading   = false;
 
+	// ソーシャルボタン共通エラー（タブに依存せず表示）
+	let socialBtnError = '';
+
 	// パスワード表示切替
 	let showLoginPw = false;
 	let showRegPw   = false;
@@ -87,8 +90,12 @@
 
 	// ── Google サインイン ───────────────────────────────────────
 	async function handleGoogle() {
+		socialBtnError = '';
 		const result = await authSignInWithGoogle();
-		if (!result.ok) { if (result.error) loginError = result.error; return; }
+		if (!result.ok) {
+			socialBtnError = result.error || '';
+			return;
+		}
 		if (!result.isNew) {
 			// 既存ユーザー → そのままホームへ
 			currentUserId.set(result.userId);
@@ -103,8 +110,12 @@
 
 	// ── Apple サインイン ────────────────────────────────────────
 	async function handleApple() {
+		socialBtnError = '';
 		const result = await authSignInWithApple();
-		if (!result.ok) { if (result.error) loginError = result.error; return; }
+		if (!result.ok) {
+			socialBtnError = result.error || '';
+			return;
+		}
 		if (!result.isNew) {
 			currentUserId.set(result.userId);
 			goto(next);
@@ -214,6 +225,9 @@
 					</svg>
 					Appleで{tab === 'login' ? 'ログイン' : '登録'}
 				</button>
+				{#if socialBtnError}
+					<div class="err-msg">{socialBtnError}</div>
+				{/if}
 			</div>
 
 			<div class="divider"><span>またはメールで</span></div>

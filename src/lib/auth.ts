@@ -101,8 +101,15 @@ export async function authSignInWithGoogle(): Promise<
 	} catch (e: unknown) {
 		const code = (e as { code?: string }).code;
 		if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-			return { ok: false, error: '' }; // ユーザーが閉じた（エラー表示不要）
+			return { ok: false, error: '' };
 		}
+		if (code === 'auth/unauthorized-domain') {
+			return { ok: false, error: 'このドメインはFirebaseで未承認です。Firebase Console > Authentication > 承認済みドメインに追加してください。' };
+		}
+		if (code === 'auth/popup-blocked') {
+			return { ok: false, error: 'ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。' };
+		}
+		console.error('Google sign-in error:', e);
 		return { ok: false, error: 'Googleログインに失敗しました' };
 	}
 }
@@ -129,6 +136,13 @@ export async function authSignInWithApple(): Promise<
 		if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
 			return { ok: false, error: '' };
 		}
+		if (code === 'auth/unauthorized-domain') {
+			return { ok: false, error: 'このドメインはFirebaseで未承認です。Firebase Console > Authentication > 承認済みドメインに追加してください。' };
+		}
+		if (code === 'auth/popup-blocked') {
+			return { ok: false, error: 'ポップアップがブロックされました。ブラウザの設定でポップアップを許可してください。' };
+		}
+		console.error('Apple sign-in error:', e);
 		return { ok: false, error: 'Appleログインに失敗しました' };
 	}
 }
