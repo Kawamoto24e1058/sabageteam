@@ -5,7 +5,7 @@
 		currentTeamResult, participationCounts, numTeams,
 		currentUser, currentUserId, myParticipatedSessions, myCheckIns,
 		checkInMember, checkOutMember, saveTeamResult, clearTeamResult,
-		deleteSession
+		endSession as endSessionFirestore
 	} from '$lib/stores';
 	import { assignTeams } from '$lib/teamAssignment';
 	import { TEAM_CONFIGS } from '$lib/teamColors';
@@ -89,13 +89,14 @@
 	let ending = false;
 	async function endSession() {
 		if (!$currentSessionId || !isCreator || ending) return;
-		if (!confirm('セッションを終了しますか？\nこの操作は取り消せません。')) return;
+		if (!confirm('セッションを終了しますか？\n全員がチェックアウトされます。')) return;
 		ending = true;
 		try {
 			const sid = $currentSessionId;
+			const memberIds = $currentCheckIns.map(ci => ci.memberId);
 			currentSessionId.set(null);
-			await clearTeamResult(sid);
-			await deleteSession(sid);
+			// チーム結果は履歴として保持したまま全員チェックアウト＆ステータス更新
+			await endSessionFirestore(sid, memberIds);
 		} finally {
 			ending = false;
 		}

@@ -3,7 +3,8 @@ import { browser } from '$app/environment';
 import type { Member, Session, CheckIn, TeamResult } from './types';
 import { db, auth } from './firebase';
 import {
-	collection, doc, setDoc, deleteDoc, onSnapshot
+	collection, doc, setDoc, deleteDoc, onSnapshot,
+	writeBatch, updateDoc
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -224,4 +225,20 @@ export async function saveTeamResult(sessionId: string, result: TeamResult): Pro
 
 export async function clearTeamResult(sessionId: string): Promise<void> {
 	await deleteDoc(doc(db, 'teamResults', sessionId));
+}
+
+// ── セッション終了（ステータス更新＋全員チェックアウト） ──────
+// チーム結果は履歴として保持する
+export async function endSession(
+	sessionId: string,
+	memberIds: string[]
+): Promise<void> {
+	const batch = writeBatch(db);
+	// 全参加者のチェックインを一括削除
+	for (const memberId of memberIds) {
+		batch.delete(doc(db, 'checkins', `${sessionId}_${memberId}`));
+	}
+	// セッションを終了済みに更新
+	batch.update(doc(db, 'sessions', sessionId), { status: 'ended' });
+	await batch.commit();
 }

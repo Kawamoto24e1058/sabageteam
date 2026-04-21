@@ -44,24 +44,31 @@
 	{:else}
 		<div class="session-list">
 			{#each sorted as s (s.id)}
-				{@const active = $currentSessionId === s.id}
-				<div class="session-card" class:active>
+				{@const active  = $currentSessionId === s.id}
+				{@const ended   = s.status === 'ended'}
+				<div class="session-card" class:active class:ended>
 					<div class="session-main">
 						<div class="s-info">
 							<div class="s-name-row">
 								<span class="s-name">{s.title}</span>
-								{#if active}<span class="badge badge-blue">開催中</span>{/if}
+								{#if ended}
+									<span class="badge badge-gray">終了済み</span>
+								{:else if active}
+									<span class="badge badge-blue">開催中</span>
+								{/if}
 								{#if myCheckedSessionIds.has(s.id)}<span class="badge badge-green">参加済み</span>{/if}
 							</div>
 							<div class="s-meta">{formatDate(s.date)}{s.location ? ` · ${s.location}` : ''}</div>
-							<div class="s-count">{ciCount(s.id)}名チェックイン</div>
+							<div class="s-count">{ciCount(s.id)}名参加</div>
 						</div>
 						<div class="s-actions">
-							<button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" on:click={() => goto(`/sessions/${s.id}`)}>QR</button>
-							{#if !active}
-								<button class="btn btn-primary" style="font-size:12px;padding:5px 12px" on:click={() => select(s.id)}>選択</button>
-							{:else}
-								<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px" on:click={() => goto('/')}>ホームへ</button>
+							{#if !ended}
+								<button class="btn btn-ghost" style="font-size:12px;padding:5px 10px" on:click={() => goto(`/sessions/${s.id}`)}>QR</button>
+								{#if !active}
+									<button class="btn btn-primary" style="font-size:12px;padding:5px 12px" on:click={() => select(s.id)}>選択</button>
+								{:else}
+									<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px" on:click={() => goto('/')}>ホームへ</button>
+								{/if}
 							{/if}
 							<button class="del-btn" on:click={() => remove(s.id)}>
 								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -108,4 +115,8 @@
 .badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:99px; }
 .badge-blue  { background:#dbeafe; color:#1d4ed8; }
 .badge-green { background:#dcfce7; color:#15803d; }
+.badge-gray  { background:#f1f5f9; color:#64748b; }
+
+.session-card.ended { background:#f8fafc; border-color:#e2e8f0; }
+.session-card.ended .s-name { color:#94a3b8; }
 </style>

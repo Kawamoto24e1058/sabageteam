@@ -19,7 +19,8 @@ export interface Session {
 	date: string;
 	location?: string;
 	createdAt: string;
-	createdBy?: string; // 作成者の userId
+	createdBy?: string;  // 作成者の userId
+	status?: 'active' | 'ended'; // 終了済みフラグ（省略時は active 扱い）
 }
 
 export interface CheckIn {
