@@ -1,10 +1,11 @@
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 import type { Member, Session, CheckIn, TeamResult } from './types';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 import {
 	collection, doc, setDoc, deleteDoc, onSnapshot
 } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // ============================================================
 // localStorage 永続化ヘルパー（端末ごとのUI状態用）
@@ -42,17 +43,40 @@ export const membersLoaded = writable(false);
 export const currentUserId = writable<string | null>(null);
 export const authReady     = writable(false);
 
-// Firestore リスナー起動（ブラウザのみ）
+// ============================================================
+// 認証確定後に Firestore リスナーを起動（タイミング問題を防ぐ）
+// ============================================================
+
 if (browser) {
-	onSnapshot(collection(db, 'members'), (snap) => {
-		members.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
-		membersLoaded.set(true);
-	});
-	onSnapshot(collection(db, 'sessions'), (snap) => {
-		sessions.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Session)));
-	});
-	onSnapshot(collection(db, 'checkins'), (snap) => {
-		allCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
+	let listenersStarted = false;
+
+	onAuthStateChanged(auth, (user) => {
+		// Auth 状態をストアに反映
+		currentUserId.set(user?.uid ?? null);
+		authReady.set(true);
+
+		if (user && !listenersStarted) {
+			// 認証済みが確定してから Firestore を購読開始
+			listenersStarted = true;
+
+			onSnapshot(
+				collection(db, 'members'),
+				(snap) => {
+					members.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member)));
+					membersLoaded.set(true);
+				},
+				(_err) => { membersLoaded.set(true); }
+			);
+			onSnapshot(collection(db, 'sessions'), (snap) => {
+				sessions.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Session)));
+			});
+			onSnapshot(collection(db, 'checkins'), (snap) => {
+				allCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
+			});
+		} else if (!user) {
+			// 未ログインの場合もフラグを立てて onboarding リダイレクトを動かす
+			membersLoaded.set(true);
+		}
 	});
 }
 

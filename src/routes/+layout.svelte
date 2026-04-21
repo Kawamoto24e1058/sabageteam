@@ -2,29 +2,17 @@
 	import '../app.css';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
-	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { currentUserId, authReady, currentUser, membersLoaded } from '$lib/stores';
 	import { authSignOut } from '$lib/auth';
-	import { auth } from '$lib/firebase';
-	import { onAuthStateChanged } from 'firebase/auth';
+
+	// stores.ts 側で onAuthStateChanged を管理しているため、ここでは購読不要
 
 	$: p = $page.url.pathname;
 	$: isCheckinPage = p.startsWith('/checkin');
 	$: isScanPage    = p.startsWith('/scan');
 	$: isOnboarding  = p.startsWith('/onboarding');
 	$: showChrome    = !isCheckinPage && !isScanPage && !isOnboarding;
-
-	// Firebase Auth リスナー（静的importに変更）
-	let unsubAuth: (() => void) | null = null;
-	onMount(() => {
-		if (!browser) return;
-		unsubAuth = onAuthStateChanged(auth, (user) => {
-			currentUserId.set(user?.uid ?? null);
-			authReady.set(true);
-		});
-	});
-	onDestroy(() => { unsubAuth?.(); });
 
 	// ① 未ログイン → オンボーディングへ（authReadyが確定したらすぐ）
 	$: if ($authReady && browser && !isOnboarding && $currentUserId === null) {
@@ -111,6 +99,18 @@
 					<line x1="3" y1="10" x2="21" y2="10"/>
 				</svg>
 				<span>セッション</span>
+			</a>
+			<!-- プロフィール -->
+			<a href="/profile" class="nav-link" class:active={p.startsWith('/profile')}>
+				{#if $currentUser}
+					<div class="nav-avatar">{$currentUser.name.slice(0, 1)}</div>
+				{:else}
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="8" r="4"/>
+						<path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+					</svg>
+				{/if}
+				<span>プロフィール</span>
 			</a>
 		</div>
 	</nav>
@@ -208,5 +208,18 @@
 }
 .nav-link.active {
 	color: #2563eb;
+}
+.nav-avatar {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	background: #2563eb;
+	color: #fff;
+	font-size: 11px;
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
 }
 </style>
