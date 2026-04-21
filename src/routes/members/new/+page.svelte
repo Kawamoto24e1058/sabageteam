@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { members, generateId } from '$lib/stores';
+	import { members, generateId, addMember } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
-	let name = '';
+	let name      = '';
 	let studentId = '';
-	let error = '';
+	let error     = '';
 	let submitting = false;
 
 	function validate() {
-		if (!name.trim())        { error = '名前を入力してください'; return false; }
-		if (!studentId.trim())   { error = '学籍番号を入力してください'; return false; }
+		if (!name.trim())      { error = '名前を入力してください'; return false; }
+		if (!studentId.trim()) { error = '学籍番号を入力してください'; return false; }
 		if ($members.some((m) => m.studentId === studentId.trim())) {
 			error = 'この学籍番号はすでに登録されています';
 			return false;
@@ -21,12 +21,18 @@
 		error = '';
 		if (!validate()) return;
 		submitting = true;
-		members.update((l) => [...l, {
-			id: generateId(), name: name.trim(),
-			studentId: studentId.trim(), createdAt: new Date().toISOString()
-		}]);
-		await new Promise((r) => setTimeout(r, 150));
-		goto('/members');
+		try {
+			await addMember({
+				id: generateId(),
+				name: name.trim(),
+				studentId: studentId.trim(),
+				createdAt: new Date().toISOString()
+			});
+			goto('/members');
+		} catch {
+			error = '登録に失敗しました。もう一度お試しください。';
+			submitting = false;
+		}
 	}
 </script>
 

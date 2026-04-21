@@ -1,38 +1,36 @@
 <script lang="ts">
-	import { sessions, currentSessionId, generateId } from '$lib/stores';
+	import { currentSessionId, generateId, addSession } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
-	// 今日の日付をデフォルトに
 	const today = new Date().toISOString().split('T')[0];
 
-	let title = '';
-	let date = today;
-	let location = '';
-	let error = '';
+	let title      = '';
+	let date       = today;
+	let location   = '';
+	let error      = '';
 	let submitting = false;
 
 	async function submit() {
 		error = '';
 		if (!title.trim()) { error = 'タイトルを入力してください'; return; }
-		if (!date) { error = '日付を選択してください'; return; }
+		if (!date)         { error = '日付を選択してください'; return; }
 		submitting = true;
 
-		const id = generateId();
-		sessions.update((list) => [
-			...list,
-			{
+		try {
+			const id = generateId();
+			await addSession({
 				id,
 				title: title.trim(),
 				date,
 				location: location.trim() || undefined,
 				createdAt: new Date().toISOString()
-			}
-		]);
-		// 作成したセッションをアクティブに
-		currentSessionId.set(id);
-
-		await new Promise((r) => setTimeout(r, 200));
-		goto(`/sessions/${id}`);
+			});
+			currentSessionId.set(id);
+			goto(`/sessions/${id}`);
+		} catch {
+			error = '作成に失敗しました。もう一度お試しください。';
+			submitting = false;
+		}
 	}
 </script>
 
@@ -41,9 +39,7 @@
 		<button
 			class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600 transition-colors"
 			on:click={() => goto('/sessions')}
-		>
-			←
-		</button>
+		>←</button>
 		<h1 class="text-xl font-bold text-gray-900">セッション作成</h1>
 	</div>
 
@@ -53,9 +49,7 @@
 				タイトル <span class="text-red-500">*</span>
 			</label>
 			<input
-				id="title"
-				type="text"
-				bind:value={title}
+				id="title" type="text" bind:value={title}
 				placeholder="例: 春季定例戦 #4"
 				class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50
 				       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -68,9 +62,7 @@
 				日付 <span class="text-red-500">*</span>
 			</label>
 			<input
-				id="date"
-				type="date"
-				bind:value={date}
+				id="date" type="date" bind:value={date}
 				class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50
 				       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
 				       text-gray-900 text-sm transition"
@@ -82,9 +74,7 @@
 				場所 <span class="text-gray-400 text-xs font-normal">任意</span>
 			</label>
 			<input
-				id="location"
-				type="text"
-				bind:value={location}
+				id="location" type="text" bind:value={location}
 				placeholder="例: フィールドA"
 				class="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50
 				       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
@@ -94,8 +84,7 @@
 
 		{#if error}
 			<div class="flex items-center gap-2 text-red-600 text-sm bg-red-50 rounded-xl px-4 py-3">
-				<span>⚠️</span>
-				<span>{error}</span>
+				<span>⚠️</span><span>{error}</span>
 			</div>
 		{/if}
 

@@ -1,75 +1,139 @@
 /**
- * シンプルなメール/パスワード認証（localStorage ベース）
- *
- * ※ MVP 用のローカル実装です。
- *   本番環境では Firebase Authentication への移行を推奨します。
+ * Firebase Authentication ラッパー
+ * Email/Password・Google・Apple サインインをサポート
  */
 
-import { browser } from '$app/environment';
+import { auth, db } from './firebase';
+import {
+	createUserWithEmailAndPassword,
+	signInWithEmailAndPassword,
+	signInWithPopup,
+	GoogleAuthProvider,
+	OAuthProvider,
+	signOut as firebaseSignOut,
+	type User
+} from 'firebase/auth';
+import {
+	doc, setDoc, getDoc, collection, query, where, getDocs
+} from 'firebase/firestore';
 import type { Member } from './types';
 
-export interface UserAccount {
-	id: string;     // Member.id と同一
-	email: string;
-	password: string;
-	createdAt: string;
-}
+// ── Firestore にメンバードキュメントが存在するか確認・作成 ─────
+export async function ensureMemberDoc(
+	user: User,
+	name?: string,
+	studentId?: string
+): Promise<Member | null> {
+	const ref  = doc(db, 'members', user.uid);
+	const snap = await getDoc(ref);
+	if (snap.exists()) return snap.data() as Member;
 
-function getAccounts(): UserAccount[] {
-	if (!browser) return [];
-	try { return JSON.parse(localStorage.getItem('sm_accounts') ?? '[]'); }
-	catch { return []; }
-}
+	// 名前と学籍番号がなければ作成不可（Googleサインイン初回など）
+	if (!name || !studentId) return null;
 
-function saveAccounts(accounts: UserAccount[]) {
-	if (browser) localStorage.setItem('sm_accounts', JSON.stringify(accounts));
-}
-
-// ── 新規登録 ─────────────────────────────────────────────────
-export function authRegister(
-	email: string,
-	password: string,
-	name: string,
-	studentId: string,
-	existingMembers: Member[]
-): { ok: true; userId: string; member: Member } | { ok: false; error: string } {
-	const accounts = getAccounts();
-
-	if (accounts.find((a) => a.email.toLowerCase() === email.trim().toLowerCase())) {
-		return { ok: false, error: 'このメールアドレスはすでに使用されています' };
-	}
-	if (existingMembers.find((m) => m.studentId === studentId.trim())) {
-		return { ok: false, error: 'この学籍番号はすでに登録されています' };
-	}
-
-	const id = Math.random().toString(36).slice(2, 10);
-	const account: UserAccount = {
-		id,
-		email: email.trim().toLowerCase(),
-		password,
-		createdAt: new Date().toISOString()
-	};
 	const member: Member = {
-		id,
+		id: user.uid,
 		name: name.trim(),
 		studentId: studentId.trim(),
 		createdAt: new Date().toISOString()
 	};
-
-	saveAccounts([...accounts, account]);
-	return { ok: true, userId: id, member };
+	await setDoc(ref, member);
+	return member;
 }
 
-// ── ログイン ─────────────────────────────────────────────────
-export function authLogin(
+// ── 学籍番号の重複チェック ──────────────────────────────────
+async function isStudentIdTaken(studentId: string): Promise<boolean> {
+	const q    = query(collection(db, 'members'), where('studentId', '==', studentId.trim()));
+	const snap = await getDocs(q);
+	return !snap.empty;
+}
+
+// ── メール/パスワード 新規登録 ─────────────────────────────
+export async function authRegister(
+	email: string,
+	password: string,
+	name: string,
+	studentId: string
+): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
+	try {
+		if (await isStudentIdTaken(studentId)) {
+			return { ok: false, error: 'この学籍番号はすでに登録されています' };
+		}
+		const cred   = await createUserWithEmailAndPassword(auth, email.trim(), password);
+		await ensureMemberDoc(cred.user, name, studentId);
+		return { ok: true, userId: cred.user.uid };
+	} catch (e: unknown) {
+		const code = (e as { code?: string }).code;
+		if (code === 'auth/email-already-in-use') return { ok: false, error: 'このメールアドレスはすでに使用されています' };
+		if (code === 'auth/weak-password')         return { ok: false, error: 'パスワードは6文字以上にしてください' };
+		return { ok: false, error: '登録に失敗しました。もう一度お試しください。' };
+	}
+}
+
+// ── メール/パスワード ログイン ──────────────────────────────
+export async function authLogin(
 	email: string,
 	password: string
-): { ok: true; userId: string } | { ok: false; error: string } {
-	const accounts = getAccounts();
-	const account = accounts.find((a) => a.email === email.trim().toLowerCase());
-
-	if (!account || account.password !== password) {
+): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
+	try {
+		const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+		return { ok: true, userId: cred.user.uid };
+	} catch {
 		return { ok: false, error: 'メールアドレスまたはパスワードが正しくありません' };
 	}
-	return { ok: true, userId: account.id };
+}
+
+// ── Google サインイン ────────────────────────────────────
+export async function authSignInWithGoogle(): Promise<
+	{ ok: true; userId: string; isNew: boolean; displayName: string | null } |
+	{ ok: false; error: string }
+> {
+	try {
+		const provider = new GoogleAuthProvider();
+		const cred     = await signInWithPopup(auth, provider);
+		const snap     = await getDoc(doc(db, 'members', cred.user.uid));
+		return {
+			ok: true,
+			userId: cred.user.uid,
+			isNew: !snap.exists(),
+			displayName: cred.user.displayName
+		};
+	} catch (e: unknown) {
+		const code = (e as { code?: string }).code;
+		if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+			return { ok: false, error: '' }; // ユーザーが閉じた（エラー表示不要）
+		}
+		return { ok: false, error: 'Googleログインに失敗しました' };
+	}
+}
+
+// ── Apple サインイン ─────────────────────────────────────
+export async function authSignInWithApple(): Promise<
+	{ ok: true; userId: string; isNew: boolean; displayName: string | null } |
+	{ ok: false; error: string }
+> {
+	try {
+		const provider = new OAuthProvider('apple.com');
+		provider.addScope('name');
+		provider.addScope('email');
+		const cred = await signInWithPopup(auth, provider);
+		const snap = await getDoc(doc(db, 'members', cred.user.uid));
+		return {
+			ok: true,
+			userId: cred.user.uid,
+			isNew: !snap.exists(),
+			displayName: cred.user.displayName
+		};
+	} catch (e: unknown) {
+		const code = (e as { code?: string }).code;
+		if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+			return { ok: false, error: '' };
+		}
+		return { ok: false, error: 'Appleログインに失敗しました' };
+	}
+}
+
+// ── サインアウト ────────────────────────────────────────
+export async function authSignOut(): Promise<void> {
+	await firebaseSignOut(auth);
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { members, participationCounts } from '$lib/stores';
+	import { members, participationCounts, deleteMember } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	let query = '';
@@ -13,9 +13,9 @@
 		return '';
 	}
 
-	function remove(id: string) {
+	async function remove(id: string) {
 		if (!confirm('このメンバーを削除しますか？')) return;
-		members.update((list) => list.filter((m) => m.id !== id));
+		await deleteMember(id);
 	}
 </script>
 

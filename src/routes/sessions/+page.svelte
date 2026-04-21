@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { sessions, currentSessionId, allCheckIns, mySessions, myCheckIns } from '$lib/stores';
+	import { currentSessionId, allCheckIns, mySessions, deleteSession } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	function formatDate(d: string) {
@@ -9,9 +9,9 @@
 		return $allCheckIns.filter((ci) => ci.sessionId === id).length;
 	}
 	function select(id: string) { currentSessionId.set(id); goto('/'); }
-	function remove(id: string) {
+	async function remove(id: string) {
 		if (!confirm('このセッションを削除しますか？')) return;
-		sessions.update((l) => l.filter((s) => s.id !== id));
+		await deleteSession(id);
 		if ($currentSessionId === id) currentSessionId.set(null);
 	}
 	// 自分が参加したセッションのみ表示（mySessions は新しい順）

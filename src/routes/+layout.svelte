@@ -4,7 +4,8 @@
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { currentUserId } from '$lib/stores';
+	import { currentUserId, authReady, currentUser, membersLoaded } from '$lib/stores';
+	import { authSignOut } from '$lib/auth';
 
 	$: p = $page.url.pathname;
 	$: isCheckinPage = p.startsWith('/checkin');
@@ -12,21 +13,33 @@
 	$: isOnboarding  = p.startsWith('/onboarding');
 	$: showChrome    = !isCheckinPage && !isScanPage && !isOnboarding;
 
-	// 未登録ならオンボーディングへリダイレクト
-	$: if (browser && $currentUserId === null && !isOnboarding) {
-		const next = p !== '/' ? encodeURIComponent(p + $page.url.search) : '';
-		goto(next ? `/onboarding?next=${next}` : '/onboarding');
-	}
-
-	// 開発中は古いService Workerをアンレジスト（干渉防止）
+	// Firebase Auth リスナーをセットアップ
 	onMount(() => {
 		if (!browser) return;
-		if (location.hostname === 'localhost' && 'serviceWorker' in navigator) {
-			navigator.serviceWorker.getRegistrations().then((regs) => {
-				regs.forEach((r) => r.unregister());
+
+		import('firebase/auth').then(({ onAuthStateChanged }) => {
+			import('$lib/firebase').then(({ auth }) => {
+				const unsub = onAuthStateChanged(auth, (user) => {
+					currentUserId.set(user?.uid ?? null);
+					authReady.set(true);
+				});
+				return unsub;
 			});
-		}
+		});
 	});
+
+	// 未ログイン or プロフィール未設定 → オンボーディングへ
+	$: if ($authReady && $membersLoaded && browser && !isOnboarding) {
+		if ($currentUserId === null || $currentUser === null) {
+			const next = p !== '/' ? encodeURIComponent(p + $page.url.search) : '';
+			goto(next ? `/onboarding?next=${next}` : '/onboarding');
+		}
+	}
+
+	async function handleSignOut() {
+		await authSignOut();
+		goto('/onboarding');
+	}
 </script>
 
 {#if showChrome}
@@ -38,6 +51,16 @@
 				<path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/>
 			</svg>
 			<span class="app-title">SabageManager</span>
+			<div style="flex:1"></div>
+			{#if $currentUser}
+				<button class="signout-btn" on:click={handleSignOut} title="ログアウト">
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+						<polyline points="16 17 21 12 16 7"/>
+						<line x1="21" y1="12" x2="9" y2="12"/>
+					</svg>
+				</button>
+			{/if}
 		</div>
 	</header>
 {/if}
@@ -120,6 +143,21 @@
 	letter-spacing: -.01em;
 }
 
+.signout-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	background: #f1f5f9;
+	color: #64748b;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background .15s, color .15s;
+}
+.signout-btn:hover { background: #fee2e2; color: #ef4444; }
+
 .app-main {
 	max-width: 42rem;
 	margin: 0 auto;
@@ -143,7 +181,7 @@
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .nav-row {
-	display: flex;          /* ← これが横並びの核心 */
+	display: flex;
 	flex-direction: row;
 	max-width: 42rem;
 	margin: 0 auto;

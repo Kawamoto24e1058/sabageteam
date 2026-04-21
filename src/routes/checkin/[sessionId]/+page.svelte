@@ -35,9 +35,9 @@
 	$: myAlready = $currentUserId ? inIds.has($currentUserId) : false;
 	$: myCount   = $participationCounts.get($currentUserId ?? '') ?? 0;
 
-	function confirmSelf() {
+	async function confirmSelf() {
 		if (!$currentUserId) return;
-		checkInMember(sid, $currentUserId, gear);
+		await checkInMember(sid, $currentUserId, gear);
 		doneForSelf = true;
 		step = 'done';
 	}
@@ -46,9 +46,9 @@
 		gear  = cis.find((ci) => ci.memberId === id)?.gearType ?? 'own';
 		step  = 'gear';
 	}
-	function confirmOther() {
+	async function confirmOther() {
 		if (!selId) return;
-		checkInMember(sid, selId, gear);
+		await checkInMember(sid, selId, gear);
 		doneForSelf = false;
 		step = 'done';
 	}
