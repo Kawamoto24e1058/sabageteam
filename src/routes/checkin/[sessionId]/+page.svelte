@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { members, sessions, allCheckIns, participationCounts, checkInMember, currentUserId } from '$lib/stores';
-	import { onMount } from 'svelte';
+	import { members, sessions, allCheckIns, participationCounts, checkInMember, currentUserId, authReady } from '$lib/stores';
 
 	$: sid     = $page.params.sessionId;
 	$: session = $sessions.find((s) => s.id === sid);
@@ -13,13 +12,16 @@
 		? $members.filter((m) => m.name.includes(query) || m.studentId.toLowerCase().includes(query.toLowerCase()))
 		: $members;
 
-	// ログイン済みなら 'self' から、未ログインなら 'list' から
+	// ログイン済みなら 'self'、未ログインなら 'list'
+	// authReady を待ってから初期化（onMount では auth が未解決のことがある）
 	let step: 'self' | 'list' | 'gear' | 'done' = 'self';
 	let selId: string | null = null;
 	let gear: 'own' | 'rental' = 'own';
-	let doneForSelf = true; // done 後に「自分のチェックイン」だったか
+	let doneForSelf = true;
+	let initialized = false;
 
-	onMount(() => {
+	$: if ($authReady && !initialized) {
+		initialized = true;
 		if ($currentUserId) {
 			selId = $currentUserId;
 			const existing = cis.find((ci) => ci.memberId === $currentUserId);
@@ -28,7 +30,13 @@
 		} else {
 			step = 'list';
 		}
-	});
+	}
+
+	// 自分のチェックイン状態がリアルタイムで変わったとき、gear を同期する
+	$: if ($currentUserId && inIds.has($currentUserId) && step === 'self') {
+		const myCi = cis.find((ci) => ci.memberId === $currentUserId);
+		if (myCi) gear = myCi.gearType;
+	}
 
 	$: sel     = $members.find((m) => m.id === selId);
 	$: already = selId ? inIds.has(selId) : false;
@@ -54,6 +62,7 @@
 	}
 	function backToSelf() {
 		selId = $currentUserId;
+		// cis はリアルタイム更新済みなので最新の gearType を取得
 		const existing = cis.find((ci) => ci.memberId === $currentUserId);
 		gear = existing?.gearType ?? 'own';
 		step = 'self';

@@ -3,11 +3,12 @@
 		members, currentSession, currentSessionId,
 		currentCheckIns, currentCheckedInCount, currentOwnGearCount, currentRentalGearCount,
 		currentTeamResult, participationCounts, teamResults, numTeams,
-		currentUser, mySessions, myCheckIns
+		currentUser, currentUserId, mySessions, myCheckIns,
+		checkInMember, checkOutMember
 	} from '$lib/stores';
 	import { assignTeams } from '$lib/teamAssignment';
 	import { TEAM_CONFIGS } from '$lib/teamColors';
-	import type { TeamMember, TeamResult } from '$lib/types';
+	import type { TeamMember, TeamResult, GearType } from '$lib/types';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
@@ -70,6 +71,41 @@
 		const parts = [m.gearType === 'own' ? '自前+2' : 'レンタル+1'];
 		if (m.expScore > 0) parts.push(`経験+${m.expScore}`);
 		return parts.join(' · ');
+	}
+
+	// 作成者かどうか
+	$: isCreator = !!$currentSession && !!$currentUserId &&
+		$currentSession.createdBy === $currentUserId;
+
+	// チェックイン済みメンバーIDセット
+	$: checkedInIds = new Set($currentCheckIns.map(ci => ci.memberId));
+
+	// 管理パネルの開閉
+	let adminOpen = false;
+
+	// 選択中の装備タイプ（メンバーごと）
+	let gearSelections: Record<string, GearType> = {};
+
+	function getGear(memberId: string): GearType {
+		return gearSelections[memberId] ?? 'own';
+	}
+
+	let ciLoading: Record<string, boolean> = {};
+
+	async function toggleCheckIn(memberId: string) {
+		if (!$currentSessionId || ciLoading[memberId]) return;
+		ciLoading[memberId] = true;
+		ciLoading = { ...ciLoading };
+		try {
+			if (checkedInIds.has(memberId)) {
+				await checkOutMember($currentSessionId, memberId);
+			} else {
+				await checkInMember($currentSessionId, memberId, getGear(memberId));
+			}
+		} finally {
+			ciLoading[memberId] = false;
+			ciLoading = { ...ciLoading };
+		}
 	}
 </script>
 
@@ -205,6 +241,83 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- 作成者用チェックイン管理パネル -->
+	{#if isCreator}
+		<div class="card admin-panel">
+			<button class="admin-toggle" on:click={() => (adminOpen = !adminOpen)}>
+				<div class="admin-toggle-left">
+					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+						<circle cx="9" cy="7" r="4"/>
+						<path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+					</svg>
+					<span>メンバーをチェックイン</span>
+					<span class="admin-count">{$currentCheckedInCount}/{$members.length}</span>
+				</div>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"
+					style="transition:transform .2s; transform:rotate({adminOpen ? 180 : 0}deg)">
+					<polyline points="6 9 12 15 18 9"/>
+				</svg>
+			</button>
+
+			{#if adminOpen}
+				<div class="admin-list">
+					{#each $members as m (m.id)}
+						{@const checked = checkedInIds.has(m.id)}
+						{@const loading = ciLoading[m.id] ?? false}
+						<div class="admin-row" class:admin-row-checked={checked}>
+							<div class="admin-member">
+								<div class="admin-avatar" class:admin-avatar-checked={checked}>
+									{m.name.slice(0, 1)}
+								</div>
+								<div class="admin-name-wrap">
+									<span class="admin-name">{m.name}</span>
+									<span class="admin-sid">{m.studentId}</span>
+								</div>
+							</div>
+
+							{#if !checked}
+								<!-- 未チェックイン：装備選択＋チェックインボタン -->
+								<div class="admin-gear-row">
+									<button
+										class="gear-mini" class:gear-mini-active={getGear(m.id) === 'own'}
+										on:click={() => { gearSelections[m.id] = 'own'; gearSelections = {...gearSelections}; }}
+									>自前</button>
+									<button
+										class="gear-mini" class:gear-mini-active={getGear(m.id) === 'rental'}
+										on:click={() => { gearSelections[m.id] = 'rental'; gearSelections = {...gearSelections}; }}
+									>レンタル</button>
+									<button
+										class="ci-btn ci-btn-in"
+										disabled={loading}
+										on:click={() => toggleCheckIn(m.id)}
+									>
+										{#if loading}…{:else}参加{/if}
+									</button>
+								</div>
+							{:else}
+								<!-- チェックイン済み：装備バッジ＋取消ボタン -->
+								{@const ci = $currentCheckIns.find(c => c.memberId === m.id)}
+								<div class="admin-gear-row">
+									<span class="gear-badge-sm {ci?.gearType === 'own' ? 'gear-own-sm' : 'gear-rental-sm'}">
+										{ci?.gearType === 'own' ? '自前' : 'レンタル'}
+									</span>
+									<button
+										class="ci-btn ci-btn-out"
+										disabled={loading}
+										on:click={() => toggleCheckIn(m.id)}
+									>
+										{#if loading}…{:else}取消{/if}
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- 参加メンバー -->
 	{#if $currentCheckedInCount > 0}
@@ -446,4 +559,64 @@
 	gap:4px 16px; font-size:12px; color:#475569;
 }
 .legend-grid span:nth-child(even) { font-weight:700; color:#0f172a; text-align:right; }
+
+/* ── 管理パネル ──────────────────────────── */
+.admin-panel { padding:0; overflow:hidden; }
+
+.admin-toggle {
+	display:flex; align-items:center; justify-content:space-between;
+	background:none; border:none; cursor:pointer; width:100%;
+	padding:14px 16px;
+}
+.admin-toggle-left { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:#0f172a; }
+.admin-count {
+	background:#f1f5f9; color:#64748b;
+	font-size:11px; font-weight:700;
+	padding:2px 7px; border-radius:99px;
+}
+
+.admin-list { border-top:1px solid #f1f5f9; }
+.admin-row {
+	display:flex; align-items:center; justify-content:space-between;
+	padding:10px 16px; gap:8px;
+	border-bottom:1px solid #f8fafc;
+	transition:background .12s;
+}
+.admin-row:last-child { border-bottom:none; }
+.admin-row-checked { background:#f0fdf4; }
+
+.admin-member { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+.admin-avatar {
+	width:34px; height:34px; border-radius:9px;
+	background:#f1f5f9; color:#64748b;
+	display:flex; align-items:center; justify-content:center;
+	font-size:13px; font-weight:700; flex-shrink:0;
+}
+.admin-avatar-checked { background:#dcfce7; color:#16a34a; }
+.admin-name-wrap { display:flex; flex-direction:column; min-width:0; }
+.admin-name { font-size:13px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.admin-sid  { font-size:11px; color:#94a3b8; }
+
+.admin-gear-row { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+
+.gear-mini {
+	padding:4px 8px; border-radius:7px; border:1px solid #e2e8f0;
+	background:#f8fafc; color:#94a3b8;
+	font-size:11px; font-weight:600; cursor:pointer; transition:all .12s;
+}
+.gear-mini-active { border-color:#2563eb; background:#eff6ff; color:#2563eb; }
+
+.ci-btn {
+	padding:5px 12px; border-radius:8px; border:none;
+	font-size:12px; font-weight:700; cursor:pointer; transition:all .12s;
+}
+.ci-btn:disabled { opacity:.5; cursor:not-allowed; }
+.ci-btn-in  { background:#2563eb; color:#fff; }
+.ci-btn-in:hover:not(:disabled)  { background:#1d4ed8; }
+.ci-btn-out { background:#fee2e2; color:#dc2626; }
+.ci-btn-out:hover:not(:disabled) { background:#fecaca; }
+
+.gear-badge-sm { font-size:10px; font-weight:600; padding:2px 7px; border-radius:99px; }
+.gear-own-sm    { background:#dbeafe; color:#1e40af; }
+.gear-rental-sm { background:#fef3c7; color:#92400e; }
 </style>

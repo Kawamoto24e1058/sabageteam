@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentSessionId, sessions, allCheckIns, currentUserId, deleteSession } from '$lib/stores';
+	import { currentSessionId, mySessions, allCheckIns, currentUserId, deleteSession } from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	function formatDate(d: string) {
@@ -14,8 +14,8 @@
 		await deleteSession(id);
 		if ($currentSessionId === id) currentSessionId.set(null);
 	}
-	// 全セッションを新しい順に表示
-	$: sorted = [...$sessions].sort((a, b) => b.date.localeCompare(a.date));
+	// 自分が作成 or 参加したセッションを新しい順に表示（mySessions は already sorted）
+	$: sorted = $mySessions;
 
 	// 自分がチェックイン済みのセッションID集合
 	$: myCheckedSessionIds = new Set(
