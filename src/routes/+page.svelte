@@ -4,7 +4,8 @@
 		currentCheckIns, currentCheckedInCount, currentOwnGearCount, currentRentalGearCount,
 		currentTeamResult, participationCounts, numTeams,
 		currentUser, currentUserId, myParticipatedSessions, myCheckIns,
-		checkInMember, checkOutMember, saveTeamResult, clearTeamResult
+		checkInMember, checkOutMember, saveTeamResult, clearTeamResult,
+		deleteSession
 	} from '$lib/stores';
 	import { assignTeams } from '$lib/teamAssignment';
 	import { TEAM_CONFIGS } from '$lib/teamColors';
@@ -62,19 +63,41 @@
 	$: isCreator = !!$currentSession && !!$currentUserId &&
 		$currentSession.createdBy === $currentUserId;
 
-	// 自分がチェックイン済みかどうか（参加者判定）
+	// 自分がチェックイン済みかどうか
 	$: isMember = !!$currentUserId && $currentCheckIns.some(ci => ci.memberId === $currentUserId);
+	$: myCurrentCi = $currentCheckIns.find(ci => ci.memberId === $currentUserId) ?? null;
 
-	// セッションを抜ける（参加者）
-	let leaving = false;
-	async function leaveSession() {
-		if (!$currentSessionId || !$currentUserId || leaving) return;
-		leaving = true;
+	// ── 自分の参加トグル ────────────────────────────────────
+	let selfGear: GearType = 'own';
+	let selfLoading = false;
+
+	async function selfCheckIn() {
+		if (!$currentSessionId || !$currentUserId || selfLoading) return;
+		selfLoading = true;
+		try { await checkInMember($currentSessionId, $currentUserId, selfGear); }
+		finally { selfLoading = false; }
+	}
+
+	async function selfCheckOut() {
+		if (!$currentSessionId || !$currentUserId || selfLoading) return;
+		selfLoading = true;
+		try { await checkOutMember($currentSessionId, $currentUserId); }
+		finally { selfLoading = false; }
+	}
+
+	// ── セッション終了（作成者のみ） ────────────────────────
+	let ending = false;
+	async function endSession() {
+		if (!$currentSessionId || !isCreator || ending) return;
+		if (!confirm('セッションを終了しますか？\nこの操作は取り消せません。')) return;
+		ending = true;
 		try {
-			await checkOutMember($currentSessionId, $currentUserId);
+			const sid = $currentSessionId;
 			currentSessionId.set(null);
+			await clearTeamResult(sid);
+			await deleteSession(sid);
 		} finally {
-			leaving = false;
+			ending = false;
 		}
 	}
 
@@ -213,6 +236,40 @@
 		</div>
 	</div>
 
+	<!-- 自分の参加状態トグル（全員共通） -->
+	{#if $currentUserId}
+		<div class="card self-status-card">
+			{#if isMember}
+				<!-- 参加中 → 不参加にするボタン -->
+				<div class="self-status-row">
+					<div class="self-status-info">
+						<span class="self-status-dot"></span>
+						<span class="self-status-label">参加中</span>
+						<span class="gear-badge-sm {myCurrentCi?.gearType === 'own' ? 'gear-own-sm' : 'gear-rental-sm'}">
+							{myCurrentCi?.gearType === 'own' ? '自前装備' : 'レンタル'}
+						</span>
+					</div>
+					<button class="self-out-btn" disabled={selfLoading} on:click={selfCheckOut}>
+						{selfLoading ? '…' : '不参加にする'}
+					</button>
+				</div>
+			{:else}
+				<!-- 未参加 → 参加するボタン＋装備選択 -->
+				<div class="self-join-row">
+					<div class="self-gear-row">
+						<button class="gear-mini" class:gear-mini-active={selfGear === 'own'}
+							on:click={() => selfGear = 'own'}>自前装備</button>
+						<button class="gear-mini" class:gear-mini-active={selfGear === 'rental'}
+							on:click={() => selfGear = 'rental'}>レンタル</button>
+					</div>
+					<button class="self-in-btn" disabled={selfLoading} on:click={selfCheckIn}>
+						{selfLoading ? '…' : '参加する'}
+					</button>
+				</div>
+			{/if}
+		</div>
+	{/if}
+
 	<!-- ══════════════════════════════════════
 	     作成者ビュー
 	══════════════════════════════════════ -->
@@ -337,6 +394,15 @@
 			{/if}
 		</div>
 
+		<!-- セッション終了ボタン（作成者のみ） -->
+		<button class="end-session-btn" disabled={ending} on:click={endSession}>
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+				<rect x="3" y="3" width="18" height="18" rx="2"/>
+				<line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
+			</svg>
+			{ending ? '終了中…' : 'セッションを終了する'}
+		</button>
+
 	<!-- ══════════════════════════════════════
 	     参加者ビュー
 	══════════════════════════════════════ -->
@@ -361,18 +427,6 @@
 					{/each}
 				</div>
 			</div>
-		{/if}
-
-		<!-- セッションを抜けるボタン -->
-		{#if isMember}
-			<button class="leave-btn" disabled={leaving} on:click={leaveSession}>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-					<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-					<polyline points="16 17 21 12 16 7"/>
-					<line x1="21" y1="12" x2="9" y2="12"/>
-				</svg>
-				{leaving ? '処理中…' : 'セッションを抜ける'}
-			</button>
 		{/if}
 
 	{/if}
@@ -542,15 +596,46 @@
 .member-me .member-avatar { background:#dbeafe; color:#1d4ed8; }
 .member-name { flex:1; font-size:13px; font-weight:600; color:#0f172a; }
 
-/* 退出ボタン */
-.leave-btn {
+/* 自分の参加状態トグルカード */
+.self-status-card { padding:12px 14px; }
+.self-status-row {
+	display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+.self-status-info { display:flex; align-items:center; gap:8px; }
+.self-status-dot {
+	width:8px; height:8px; border-radius:50%; background:#22c55e;
+	animation:pulse 2s infinite; flex-shrink:0;
+}
+.self-status-label { font-size:13px; font-weight:700; color:#15803d; }
+.self-out-btn {
+	padding:6px 14px; border-radius:8px; border:1.5px solid #fca5a5;
+	background:#fff; color:#dc2626; font-size:12px; font-weight:600;
+	cursor:pointer; transition:background .15s; flex-shrink:0;
+	white-space:nowrap;
+}
+.self-out-btn:hover:not(:disabled) { background:#fff1f2; }
+.self-out-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.self-join-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.self-gear-row { display:flex; gap:6px; }
+.self-in-btn {
+	padding:7px 18px; border-radius:9px; border:none;
+	background:#2563eb; color:#fff; font-size:13px; font-weight:700;
+	cursor:pointer; transition:background .15s; flex-shrink:0;
+	white-space:nowrap;
+}
+.self-in-btn:hover:not(:disabled) { background:#1d4ed8; }
+.self-in-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+/* セッション終了ボタン（作成者） */
+.end-session-btn {
 	display:flex; align-items:center; justify-content:center; gap:7px;
-	width:100%; padding:12px; border-radius:10px; border:1.5px solid #fecaca;
+	width:100%; padding:12px; border-radius:10px; border:1.5px solid #fca5a5;
 	background:#fff; color:#dc2626; font-size:13px; font-weight:600;
 	cursor:pointer; transition:background .15s;
 }
-.leave-btn:hover:not(:disabled) { background:#fff1f2; }
-.leave-btn:disabled { opacity:.5; cursor:not-allowed; }
+.end-session-btn:hover:not(:disabled) { background:#fff1f2; }
+.end-session-btn:disabled { opacity:.5; cursor:not-allowed; }
 
 /* チップ */
 .chips { display:flex; flex-wrap:wrap; gap:6px; }
