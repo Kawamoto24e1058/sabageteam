@@ -5,28 +5,36 @@
 	import { auth } from '$lib/firebase';
 	import {
 		authLogin, authRegister,
-		authSignInWithGoogle, authSignInWithApple,
-		ensureMemberDoc
+		authSignInWithGoogle,
+		authSendPhoneOTP, authVerifyPhoneOTP,
+		ensureMemberDoc, toE164
 	} from '$lib/auth';
-	import { currentUserId } from '$lib/stores';
-	import type { User } from 'firebase/auth';
+	import { currentUserId, members } from '$lib/stores';
+	import type { Member } from '$lib/types';
+	import type { User, ConfirmationResult } from 'firebase/auth';
+
+	// 登録完了後、Firestoreのsnapshotが届く前にストアへ即時反映
+	function injectMember(member: Member) {
+		members.update((list) => {
+			if (list.find((m) => m.id === member.id)) return list;
+			return [...list, member];
+		});
+	}
 
 	$: next = $page.url.searchParams.get('next') ?? '/';
 
-	// ── ステート ────────────────────────────────────────────────
-	// 'auth'         : ログイン/新規登録フォーム
-	// 'social-profile': Google/Apple初回サインイン → 学籍番号入力
-	type PageState = 'auth' | 'social-profile';
+	// ── ステート ──────────────────────────────────────────────
+	type PageState = 'auth' | 'phone-input' | 'phone-otp' | 'social-profile';
 	let state: PageState = 'auth';
 	let tab: 'login' | 'register' = 'login';
 
-	// ── ログイン ──
+	// ── メールログイン ──
 	let loginEmail    = '';
 	let loginPassword = '';
 	let loginError    = '';
 	let loginLoading  = false;
 
-	// ── 新規登録 ──
+	// ── メール新規登録 ──
 	let regName      = '';
 	let regStudentId = '';
 	let regEmail     = '';
@@ -35,39 +43,41 @@
 	let regError     = '';
 	let regLoading   = false;
 
-	// ── ソーシャル認証後のプロフィール設定 ──
+	// ── 電話番号認証 ──
+	let phoneNumber     = '';
+	let phoneOtp        = '';
+	let phoneError      = '';
+	let phoneSending    = false;
+	let phoneVerifying  = false;
+	let confirmation: ConfirmationResult | null = null;
+
+	// ── ソーシャル/電話番号 → プロフィール設定 ──
 	let socialUser: User | null = null;
 	let socialStudentId = '';
 	let socialName      = '';
 	let socialError     = '';
 	let socialLoading   = false;
 
-	// ソーシャルボタン共通エラー（タブに依存せず表示）
+	// ソーシャルボタン共通エラー
 	let socialBtnError = '';
 
 	// パスワード表示切替
 	let showLoginPw = false;
 	let showRegPw   = false;
 
-	// ── メールログイン ──────────────────────────────────────────
+	// ── メールログイン ──────────────────────────────────────
 	async function handleLogin() {
 		loginError = '';
-		if (!loginEmail.trim() || !loginPassword) {
-			loginError = 'すべての項目を入力してください'; return;
-		}
+		if (!loginEmail.trim() || !loginPassword) { loginError = 'すべての項目を入力してください'; return; }
 		loginLoading = true;
 		await tick();
 		const result = await authLogin(loginEmail, loginPassword);
-		if (result.ok) {
-			currentUserId.set(result.userId);
-			goto(next);
-		} else {
-			loginError = result.error;
-		}
+		if (result.ok) { currentUserId.set(result.userId); goto(next); }
+		else loginError = result.error;
 		loginLoading = false;
 	}
 
-	// ── メール新規登録 ─────────────────────────────────────────
+	// ── メール新規登録 ────────────────────────────────────────
 	async function handleRegister() {
 		regError = '';
 		if (!regName.trim() || !regStudentId.trim() || !regEmail.trim() || !regPassword) {
@@ -75,88 +85,87 @@
 		}
 		if (regPassword.length < 6) { regError = 'パスワードは6文字以上にしてください'; return; }
 		if (regPassword !== regConfirm) { regError = 'パスワードが一致しません'; return; }
-
 		regLoading = true;
 		await tick();
 		const result = await authRegister(regEmail, regPassword, regName, regStudentId);
 		if (result.ok) {
+			injectMember({ id: result.userId, name: regName.trim(), studentId: regStudentId.trim(), createdAt: new Date().toISOString() });
 			currentUserId.set(result.userId);
 			goto(next);
-		} else {
-			regError = result.error;
-		}
+		} else regError = result.error;
 		regLoading = false;
 	}
 
-	// ── Google サインイン ───────────────────────────────────────
+	// ── Google サインイン ────────────────────────────────────
 	async function handleGoogle() {
 		socialBtnError = '';
 		const result = await authSignInWithGoogle();
-		if (!result.ok) {
-			socialBtnError = result.error || '';
-			return;
-		}
-		if (!result.isNew) {
-			// 既存ユーザー → そのままホームへ
-			currentUserId.set(result.userId);
-			goto(next);
-		} else {
-			// 新規ユーザー → 学籍番号入力へ
-			socialUser   = auth.currentUser;
-			socialName   = result.displayName ?? '';
-			state        = 'social-profile';
-		}
+		if (!result.ok) { socialBtnError = result.error || ''; return; }
+		if (!result.isNew) { currentUserId.set(result.userId); goto(next); }
+		else { socialUser = auth.currentUser; socialName = result.displayName ?? ''; state = 'social-profile'; }
 	}
 
-	// ── Apple サインイン ────────────────────────────────────────
-	async function handleApple() {
-		socialBtnError = '';
-		const result = await authSignInWithApple();
-		if (!result.ok) {
-			socialBtnError = result.error || '';
-			return;
-		}
-		if (!result.isNew) {
-			currentUserId.set(result.userId);
-			goto(next);
-		} else {
-			socialUser   = auth.currentUser;
-			socialName   = result.displayName ?? '';
-			state        = 'social-profile';
-		}
+	// ── 電話番号：SMS送信 ────────────────────────────────────
+	async function handleSendOtp() {
+		phoneError = '';
+		if (!phoneNumber.trim()) { phoneError = '電話番号を入力してください'; return; }
+		phoneSending = true;
+		await tick();
+		const result = await authSendPhoneOTP(phoneNumber.trim(), 'recaptcha-container');
+		if (result.ok) { confirmation = result.confirmation; state = 'phone-otp'; }
+		else phoneError = result.error;
+		phoneSending = false;
 	}
 
-	// ── ソーシャル初回プロフィール保存 ─────────────────────────
+	// ── 電話番号：OTP確認 ────────────────────────────────────
+	async function handleVerifyOtp() {
+		phoneError = '';
+		if (!phoneOtp.trim()) { phoneError = '認証コードを入力してください'; return; }
+		if (!confirmation) { phoneError = 'エラーが発生しました。最初からやり直してください'; return; }
+		phoneVerifying = true;
+		await tick();
+		const result = await authVerifyPhoneOTP(confirmation, phoneOtp.trim());
+		if (result.ok) {
+			if (!result.isNew) { currentUserId.set(result.userId); goto(next); }
+			else { socialUser = auth.currentUser; socialName = ''; state = 'social-profile'; }
+		} else phoneError = result.error;
+		phoneVerifying = false;
+	}
+
+	// ── ソーシャル/電話 → プロフィール保存 ──────────────────
 	async function handleSocialProfile() {
 		socialError = '';
 		if (!socialName.trim())      { socialError = '名前を入力してください'; return; }
 		if (!socialStudentId.trim()) { socialError = '学籍番号を入力してください'; return; }
 		if (!socialUser) { socialError = 'エラーが発生しました。再度サインインしてください'; return; }
-
 		socialLoading = true;
 		await tick();
 		try {
 			const member = await ensureMemberDoc(socialUser, socialName, socialStudentId);
 			if (!member) { socialError = '登録に失敗しました'; socialLoading = false; return; }
+			injectMember(member);
 			currentUserId.set(socialUser.uid);
 			goto(next);
-		} catch (e: unknown) {
+		} catch {
 			socialError = '登録に失敗しました。もう一度お試しください。';
 			socialLoading = false;
 		}
 	}
 
-	function switchTab(t: 'login' | 'register') {
-		tab = t; loginError = ''; regError = '';
-	}
+	function switchTab(t: 'login' | 'register') { tab = t; loginError = ''; regError = ''; }
 </script>
 
 <svelte:head>
 	<title>
-		{state === 'social-profile' ? 'プロフィール設定' : tab === 'login' ? 'ログイン' : '新規登録'}
+		{state === 'social-profile' ? 'プロフィール設定'
+		 : state === 'phone-input' || state === 'phone-otp' ? '電話番号認証'
+		 : tab === 'login' ? 'ログイン' : '新規登録'}
 		| SabageManager
 	</title>
 </svelte:head>
+
+<!-- reCAPTCHA の invisible コンテナ（画面に表示されない） -->
+<div id="recaptcha-container"></div>
 
 <div class="shell">
 	<!-- ヘッダー -->
@@ -172,43 +181,82 @@
 		<p class="app-sub">サバゲーサークル管理アプリ</p>
 	</div>
 
-	<!-- カード -->
 	<div class="card">
 
-		<!-- ══ ソーシャルサインイン後のプロフィール設定 ══ -->
+		<!-- ══ プロフィール設定（Google/電話番号の初回） ══ -->
 		{#if state === 'social-profile'}
 			<div class="social-profile-head">
 				<p class="social-profile-title">プロフィールを設定</p>
-				<p class="social-profile-sub">学籍番号を登録してください</p>
+				<p class="social-profile-sub">名前と学籍番号を登録してください</p>
 			</div>
 			<form class="form" on:submit|preventDefault={handleSocialProfile}>
 				<div class="field">
 					<label class="label" for="sp-name">名前</label>
-					<input id="sp-name" type="text" bind:value={socialName}
-						placeholder="例：田中 翔太" class="input" />
+					<input id="sp-name" type="text" bind:value={socialName} placeholder="例：田中 翔太" class="input" />
 				</div>
 				<div class="field">
 					<label class="label" for="sp-sid">学籍番号</label>
-					<input id="sp-sid" type="text" bind:value={socialStudentId}
-						placeholder="例：S2401001" class="input mono" />
+					<input id="sp-sid" type="text" bind:value={socialStudentId} placeholder="例：S2401001" class="input mono" />
 				</div>
-				{#if socialError}
-					<div class="err-msg">{socialError}</div>
-				{/if}
+				{#if socialError}<div class="err-msg">{socialError}</div>{/if}
 				<button type="submit" class="submit-btn" disabled={socialLoading}>
 					{socialLoading ? '設定中…' : '設定を保存'}
 				</button>
 			</form>
 
+		<!-- ══ 電話番号入力 ══ -->
+		{:else if state === 'phone-input'}
+			<div class="phone-head">
+				<button class="back-btn" on:click={() => { state = 'auth'; phoneError = ''; }}>
+					← 戻る
+				</button>
+				<p class="phone-title">電話番号でサインイン</p>
+				<p class="phone-sub">SMS認証コードを送信します</p>
+			</div>
+			<form class="form" on:submit|preventDefault={handleSendOtp}>
+				<div class="field">
+					<label class="label" for="phone">電話番号</label>
+					<input id="phone" type="tel" bind:value={phoneNumber}
+						placeholder="090-1234-5678" class="input"
+						autocomplete="tel" inputmode="tel" />
+					<span class="hint-label">日本国内の番号はそのまま入力できます</span>
+				</div>
+				{#if phoneError}<div class="err-msg">{phoneError}</div>{/if}
+				<button type="submit" class="submit-btn" disabled={phoneSending}>
+					{phoneSending ? '送信中…' : '認証コードを送る'}
+				</button>
+			</form>
+
+		<!-- ══ OTP入力 ══ -->
+		{:else if state === 'phone-otp'}
+			<div class="phone-head">
+				<button class="back-btn" on:click={() => { state = 'phone-input'; phoneOtp = ''; phoneError = ''; }}>
+					← 再送信
+				</button>
+				<p class="phone-title">認証コードを入力</p>
+				<p class="phone-sub">{toE164(phoneNumber)} に送信しました</p>
+			</div>
+			<form class="form" on:submit|preventDefault={handleVerifyOtp}>
+				<div class="field">
+					<label class="label" for="otp">6桁の認証コード</label>
+					<input id="otp" type="text" bind:value={phoneOtp}
+						placeholder="123456" class="input otp-input"
+						inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+				</div>
+				{#if phoneError}<div class="err-msg">{phoneError}</div>{/if}
+				<button type="submit" class="submit-btn" disabled={phoneVerifying}>
+					{phoneVerifying ? '確認中…' : '認証する'}
+				</button>
+			</form>
+
 		<!-- ══ ログイン / 新規登録 ══ -->
 		{:else}
-			<!-- タブ -->
 			<div class="tabs">
 				<button class="tab" class:active={tab === 'login'}    on:click={() => switchTab('login')}>ログイン</button>
 				<button class="tab" class:active={tab === 'register'} on:click={() => switchTab('register')}>新規登録</button>
 			</div>
 
-			<!-- ソーシャルログイン -->
+			<!-- ソーシャル・電話番号ボタン -->
 			<div class="social-btns">
 				<button class="social-btn google-btn" on:click={handleGoogle} type="button">
 					<svg width="18" height="18" viewBox="0 0 24 24">
@@ -219,11 +267,11 @@
 					</svg>
 					Googleで{tab === 'login' ? 'ログイン' : '登録'}
 				</button>
-				<button class="social-btn apple-btn" on:click={handleApple} type="button">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-						<path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+				<button class="social-btn phone-btn" on:click={() => { state = 'phone-input'; phoneError = ''; }} type="button">
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.8a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
 					</svg>
-					Appleで{tab === 'login' ? 'ログイン' : '登録'}
+					電話番号で{tab === 'login' ? 'ログイン' : '登録'}
 				</button>
 				{#if socialBtnError}
 					<div class="err-msg">{socialBtnError}</div>
@@ -233,12 +281,10 @@
 			<div class="divider"><span>またはメールで</span></div>
 
 			{#if tab === 'login'}
-			<!-- ── ログインフォーム ── -->
 			<form class="form" on:submit|preventDefault={handleLogin}>
 				<div class="field">
 					<label class="label" for="l-email">メールアドレス</label>
-					<input id="l-email" type="email" bind:value={loginEmail}
-						placeholder="example@mail.com" class="input" autocomplete="email" />
+					<input id="l-email" type="email" bind:value={loginEmail} placeholder="example@mail.com" class="input" autocomplete="email" />
 				</div>
 				<div class="field">
 					<label class="label" for="l-pw">パスワード</label>
@@ -249,15 +295,13 @@
 							<input id="l-pw" type="password" bind:value={loginPassword} placeholder="パスワードを入力" class="input" autocomplete="current-password" />
 						{/if}
 						<button type="button" class="eye-btn" on:click={() => (showLoginPw = !showLoginPw)} tabindex="-1">
-							{#if showLoginPw}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+								{#if showLoginPw}
 									<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
-								</svg>
-							{:else}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+								{:else}
 									<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-								</svg>
-							{/if}
+								{/if}
+							</svg>
 						</button>
 					</div>
 				</div>
@@ -268,22 +312,18 @@
 			</form>
 
 			{:else}
-			<!-- ── 新規登録フォーム ── -->
 			<form class="form" on:submit|preventDefault={handleRegister}>
 				<div class="field">
 					<label class="label" for="r-name">名前</label>
-					<input id="r-name" type="text" bind:value={regName}
-						placeholder="例：田中 翔太" class="input" autocomplete="name" />
+					<input id="r-name" type="text" bind:value={regName} placeholder="例：田中 翔太" class="input" autocomplete="name" />
 				</div>
 				<div class="field">
 					<label class="label" for="r-sid">学籍番号</label>
-					<input id="r-sid" type="text" bind:value={regStudentId}
-						placeholder="例：S2401001" class="input mono" autocomplete="off" />
+					<input id="r-sid" type="text" bind:value={regStudentId} placeholder="例：S2401001" class="input mono" autocomplete="off" />
 				</div>
 				<div class="field">
 					<label class="label" for="r-email">メールアドレス</label>
-					<input id="r-email" type="email" bind:value={regEmail}
-						placeholder="example@mail.com" class="input" autocomplete="email" />
+					<input id="r-email" type="email" bind:value={regEmail} placeholder="example@mail.com" class="input" autocomplete="email" />
 				</div>
 				<div class="field">
 					<label class="label" for="r-pw">パスワード <span class="hint-label">（6文字以上）</span></label>
@@ -294,15 +334,13 @@
 							<input id="r-pw" type="password" bind:value={regPassword} placeholder="パスワードを設定" class="input" autocomplete="new-password" />
 						{/if}
 						<button type="button" class="eye-btn" on:click={() => (showRegPw = !showRegPw)} tabindex="-1">
-							{#if showRegPw}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+								{#if showRegPw}
 									<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
-								</svg>
-							{:else}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+								{:else}
 									<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-								</svg>
-							{/if}
+								{/if}
+							</svg>
 						</button>
 					</div>
 				</div>
@@ -325,6 +363,8 @@
 </div>
 
 <style>
+#recaptcha-container { display: none; }
+
 .shell {
 	min-height: 100vh;
 	display: flex;
@@ -333,12 +373,8 @@
 }
 .top {
 	padding: 52px 24px 28px;
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	text-align: center;
-	gap: 8px;
-	flex-shrink: 0;
+	display: flex; flex-direction: column; align-items: center;
+	text-align: center; gap: 8px; flex-shrink: 0;
 }
 .app-icon {
 	width: 60px; height: 60px; border-radius: 18px;
@@ -351,12 +387,9 @@
 .app-sub   { font-size: 13px; color: #475569; margin: 0; }
 
 .card {
-	flex: 1;
-	background: #fff;
+	flex: 1; background: #fff;
 	border-radius: 20px 20px 0 0;
-	overflow: hidden;
-	display: flex;
-	flex-direction: column;
+	overflow: hidden; display: flex; flex-direction: column;
 }
 
 /* タブ */
@@ -366,8 +399,7 @@
 	background: none; border: none; cursor: pointer;
 	font-size: 14px; font-weight: 600; color: #94a3b8;
 	border-bottom: 2px solid transparent;
-	transition: color .15s, border-color .15s;
-	margin-bottom: -1px;
+	transition: color .15s, border-color .15s; margin-bottom: -1px;
 }
 .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
 
@@ -380,16 +412,14 @@
 }
 .google-btn { background: #fff; color: #0f172a; }
 .google-btn:hover { background: #f8fafc; }
-.apple-btn  { background: #000; color: #fff; border-color: #000; }
-.apple-btn:hover { background: #1a1a1a; }
+.phone-btn  { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.phone-btn:hover { background: #dcfce7; }
 
 .divider {
 	display: flex; align-items: center; gap: 12px;
 	padding: 12px 20px; color: #94a3b8; font-size: 12px;
 }
-.divider::before, .divider::after {
-	content: ''; flex: 1; height: 1px; background: #e2e8f0;
-}
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
 
 /* フォーム */
 .form { padding: 4px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
@@ -397,6 +427,12 @@
 .label { font-size: 13px; font-weight: 600; color: #374151; }
 .hint-label { font-size: 11px; font-weight: 400; color: #94a3b8; }
 .mono { font-family: monospace; letter-spacing: .05em; }
+
+/* OTP入力 */
+.otp-input {
+	font-size: 22px; font-weight: 700; letter-spacing: .2em;
+	text-align: center; font-family: monospace;
+}
 
 /* パスワード */
 .pw-wrap { position: relative; }
@@ -410,25 +446,45 @@
 .eye-btn:hover { color: #475569; }
 
 /* エラー */
-.err-msg {
-	background: #fee2e2; color: #b91c1c;
-	border-radius: 8px; padding: 10px 12px; font-size: 13px;
-}
+.err-msg { background: #fee2e2; color: #b91c1c; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
 
 /* 送信ボタン */
 .submit-btn {
-	padding: 14px;
-	background: #2563eb; color: #fff;
+	padding: 14px; background: #2563eb; color: #fff;
 	border: none; border-radius: 12px;
-	font-size: 15px; font-weight: 700;
-	cursor: pointer;
+	font-size: 15px; font-weight: 700; cursor: pointer;
 	transition: background .15s, opacity .15s;
 }
 .submit-btn:hover:not(:disabled) { background: #1d4ed8; }
 .submit-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ソーシャル初回プロフィール */
+/* 電話番号画面 */
+.phone-head { padding: 20px 20px 0; }
+.back-btn {
+	background: none; border: none; color: #64748b;
+	font-size: 13px; font-weight: 600; cursor: pointer;
+	padding: 0 0 12px; display: block;
+}
+.back-btn:hover { color: #2563eb; }
+.phone-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+.phone-sub   { font-size: 13px; color: #94a3b8; margin: 0 0 4px; }
+
+/* プロフィール設定 */
 .social-profile-head { padding: 24px 20px 0; text-align: center; }
 .social-profile-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
 .social-profile-sub   { font-size: 13px; color: #94a3b8; margin: 0; }
+
+/* 入力フィールド共通（グローバルスタイルで定義されている場合はこちらは不要） */
+:global(.input) {
+	width: 100%; padding: 12px 14px;
+	border: 1px solid #e2e8f0; border-radius: 10px;
+	background: #f8fafc; color: #0f172a;
+	font-size: 14px; box-sizing: border-box;
+	transition: border-color .15s, box-shadow .15s;
+	outline: none;
+}
+:global(.input:focus) {
+	border-color: #2563eb;
+	box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+}
 </style>
