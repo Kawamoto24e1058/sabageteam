@@ -3,17 +3,11 @@
 	import { page } from '$app/stores';
 	import { tick } from 'svelte';
 	import { auth } from '$lib/firebase';
-	import {
-		authLogin, authRegister,
-		authSignInWithGoogle,
-		authSendPhoneOTP, authVerifyPhoneOTP,
-		ensureMemberDoc, toE164
-	} from '$lib/auth';
+	import { authLogin, authRegister, authSignInWithGoogle, ensureMemberDoc } from '$lib/auth';
 	import { currentUserId, members } from '$lib/stores';
 	import type { Member } from '$lib/types';
-	import type { User, ConfirmationResult } from 'firebase/auth';
+	import type { User } from 'firebase/auth';
 
-	// 登録完了後、Firestoreのsnapshotが届く前にストアへ即時反映
 	function injectMember(member: Member) {
 		members.update((list) => {
 			if (list.find((m) => m.id === member.id)) return list;
@@ -23,18 +17,17 @@
 
 	$: next = $page.url.searchParams.get('next') ?? '/';
 
-	// ── ステート ──────────────────────────────────────────────
-	type PageState = 'auth' | 'phone-input' | 'phone-otp' | 'social-profile';
+	type PageState = 'auth' | 'social-profile';
 	let state: PageState = 'auth';
 	let tab: 'login' | 'register' = 'login';
 
-	// ── メールログイン ──
+	// メールログイン
 	let loginEmail    = '';
 	let loginPassword = '';
 	let loginError    = '';
 	let loginLoading  = false;
 
-	// ── メール新規登録 ──
+	// メール新規登録
 	let regName      = '';
 	let regStudentId = '';
 	let regEmail     = '';
@@ -43,29 +36,17 @@
 	let regError     = '';
 	let regLoading   = false;
 
-	// ── 電話番号認証 ──
-	let phoneNumber     = '';
-	let phoneOtp        = '';
-	let phoneError      = '';
-	let phoneSending    = false;
-	let phoneVerifying  = false;
-	let confirmation: ConfirmationResult | null = null;
-
-	// ── ソーシャル/電話番号 → プロフィール設定 ──
+	// ソーシャル → プロフィール設定
 	let socialUser: User | null = null;
 	let socialStudentId = '';
 	let socialName      = '';
 	let socialError     = '';
 	let socialLoading   = false;
+	let socialBtnError  = '';
 
-	// ソーシャルボタン共通エラー
-	let socialBtnError = '';
-
-	// パスワード表示切替
 	let showLoginPw = false;
 	let showRegPw   = false;
 
-	// ── メールログイン ──────────────────────────────────────
 	async function handleLogin() {
 		loginError = '';
 		if (!loginEmail.trim() || !loginPassword) { loginError = 'すべての項目を入力してください'; return; }
@@ -77,7 +58,6 @@
 		loginLoading = false;
 	}
 
-	// ── メール新規登録 ────────────────────────────────────────
 	async function handleRegister() {
 		regError = '';
 		if (!regName.trim() || !regStudentId.trim() || !regEmail.trim() || !regPassword) {
@@ -96,7 +76,6 @@
 		regLoading = false;
 	}
 
-	// ── Google サインイン ────────────────────────────────────
 	async function handleGoogle() {
 		socialBtnError = '';
 		const result = await authSignInWithGoogle();
@@ -105,34 +84,6 @@
 		else { socialUser = auth.currentUser; socialName = result.displayName ?? ''; state = 'social-profile'; }
 	}
 
-	// ── 電話番号：SMS送信 ────────────────────────────────────
-	async function handleSendOtp() {
-		phoneError = '';
-		if (!phoneNumber.trim()) { phoneError = '電話番号を入力してください'; return; }
-		phoneSending = true;
-		await tick();
-		const result = await authSendPhoneOTP(phoneNumber.trim(), 'recaptcha-container');
-		if (result.ok) { confirmation = result.confirmation; state = 'phone-otp'; }
-		else phoneError = result.error;
-		phoneSending = false;
-	}
-
-	// ── 電話番号：OTP確認 ────────────────────────────────────
-	async function handleVerifyOtp() {
-		phoneError = '';
-		if (!phoneOtp.trim()) { phoneError = '認証コードを入力してください'; return; }
-		if (!confirmation) { phoneError = 'エラーが発生しました。最初からやり直してください'; return; }
-		phoneVerifying = true;
-		await tick();
-		const result = await authVerifyPhoneOTP(confirmation, phoneOtp.trim());
-		if (result.ok) {
-			if (!result.isNew) { currentUserId.set(result.userId); goto(next); }
-			else { socialUser = auth.currentUser; socialName = ''; state = 'social-profile'; }
-		} else phoneError = result.error;
-		phoneVerifying = false;
-	}
-
-	// ── ソーシャル/電話 → プロフィール保存 ──────────────────
 	async function handleSocialProfile() {
 		socialError = '';
 		if (!socialName.trim())      { socialError = '名前を入力してください'; return; }
@@ -156,19 +107,10 @@
 </script>
 
 <svelte:head>
-	<title>
-		{state === 'social-profile' ? 'プロフィール設定'
-		 : state === 'phone-input' || state === 'phone-otp' ? '電話番号認証'
-		 : tab === 'login' ? 'ログイン' : '新規登録'}
-		| SabageManager
-	</title>
+	<title>{state === 'social-profile' ? 'プロフィール設定' : tab === 'login' ? 'ログイン' : '新規登録'} | SabageManager</title>
 </svelte:head>
 
-<!-- reCAPTCHA の invisible コンテナ（画面に表示されない） -->
-<div id="recaptcha-container"></div>
-
 <div class="shell">
-	<!-- ヘッダー -->
 	<div class="top">
 		<div class="app-icon">
 			<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round">
@@ -183,11 +125,11 @@
 
 	<div class="card">
 
-		<!-- ══ プロフィール設定（Google/電話番号の初回） ══ -->
+		<!-- プロフィール設定（Google初回） -->
 		{#if state === 'social-profile'}
-			<div class="social-profile-head">
-				<p class="social-profile-title">プロフィールを設定</p>
-				<p class="social-profile-sub">名前と学籍番号を登録してください</p>
+			<div class="sp-head">
+				<p class="sp-title">プロフィールを設定</p>
+				<p class="sp-sub">名前と学籍番号を登録してください</p>
 			</div>
 			<form class="form" on:submit|preventDefault={handleSocialProfile}>
 				<div class="field">
@@ -204,59 +146,13 @@
 				</button>
 			</form>
 
-		<!-- ══ 電話番号入力 ══ -->
-		{:else if state === 'phone-input'}
-			<div class="phone-head">
-				<button class="back-btn" on:click={() => { state = 'auth'; phoneError = ''; }}>
-					← 戻る
-				</button>
-				<p class="phone-title">電話番号でサインイン</p>
-				<p class="phone-sub">SMS認証コードを送信します</p>
-			</div>
-			<form class="form" on:submit|preventDefault={handleSendOtp}>
-				<div class="field">
-					<label class="label" for="phone">電話番号</label>
-					<input id="phone" type="tel" bind:value={phoneNumber}
-						placeholder="090-1234-5678" class="input"
-						autocomplete="tel" inputmode="tel" />
-					<span class="hint-label">日本国内の番号はそのまま入力できます</span>
-				</div>
-				{#if phoneError}<div class="err-msg">{phoneError}</div>{/if}
-				<button type="submit" class="submit-btn" disabled={phoneSending}>
-					{phoneSending ? '送信中…' : '認証コードを送る'}
-				</button>
-			</form>
-
-		<!-- ══ OTP入力 ══ -->
-		{:else if state === 'phone-otp'}
-			<div class="phone-head">
-				<button class="back-btn" on:click={() => { state = 'phone-input'; phoneOtp = ''; phoneError = ''; }}>
-					← 再送信
-				</button>
-				<p class="phone-title">認証コードを入力</p>
-				<p class="phone-sub">{toE164(phoneNumber)} に送信しました</p>
-			</div>
-			<form class="form" on:submit|preventDefault={handleVerifyOtp}>
-				<div class="field">
-					<label class="label" for="otp">6桁の認証コード</label>
-					<input id="otp" type="text" bind:value={phoneOtp}
-						placeholder="123456" class="input otp-input"
-						inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
-				</div>
-				{#if phoneError}<div class="err-msg">{phoneError}</div>{/if}
-				<button type="submit" class="submit-btn" disabled={phoneVerifying}>
-					{phoneVerifying ? '確認中…' : '認証する'}
-				</button>
-			</form>
-
-		<!-- ══ ログイン / 新規登録 ══ -->
+		<!-- ログイン / 新規登録 -->
 		{:else}
 			<div class="tabs">
 				<button class="tab" class:active={tab === 'login'}    on:click={() => switchTab('login')}>ログイン</button>
 				<button class="tab" class:active={tab === 'register'} on:click={() => switchTab('register')}>新規登録</button>
 			</div>
 
-			<!-- ソーシャル・電話番号ボタン -->
 			<div class="social-btns">
 				<button class="social-btn google-btn" on:click={handleGoogle} type="button">
 					<svg width="18" height="18" viewBox="0 0 24 24">
@@ -266,12 +162,6 @@
 						<path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
 					</svg>
 					Googleで{tab === 'login' ? 'ログイン' : '登録'}
-				</button>
-				<button class="social-btn phone-btn" on:click={() => { state = 'phone-input'; phoneError = ''; }} type="button">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-						<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1.27h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.8a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-					</svg>
-					電話番号で{tab === 'login' ? 'ログイン' : '登録'}
 				</button>
 				{#if socialBtnError}
 					<div class="err-msg">{socialBtnError}</div>
@@ -289,11 +179,8 @@
 				<div class="field">
 					<label class="label" for="l-pw">パスワード</label>
 					<div class="pw-wrap">
-						{#if showLoginPw}
-							<input id="l-pw" type="text"     bind:value={loginPassword} placeholder="パスワードを入力" class="input" autocomplete="current-password" />
-						{:else}
-							<input id="l-pw" type="password" bind:value={loginPassword} placeholder="パスワードを入力" class="input" autocomplete="current-password" />
-						{/if}
+						<input id="l-pw" type={showLoginPw ? 'text' : 'password'} bind:value={loginPassword}
+							placeholder="パスワードを入力" class="input" autocomplete="current-password" />
 						<button type="button" class="eye-btn" on:click={() => (showLoginPw = !showLoginPw)} tabindex="-1">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 								{#if showLoginPw}
@@ -328,11 +215,8 @@
 				<div class="field">
 					<label class="label" for="r-pw">パスワード <span class="hint-label">（6文字以上）</span></label>
 					<div class="pw-wrap">
-						{#if showRegPw}
-							<input id="r-pw" type="text"     bind:value={regPassword} placeholder="パスワードを設定" class="input" autocomplete="new-password" />
-						{:else}
-							<input id="r-pw" type="password" bind:value={regPassword} placeholder="パスワードを設定" class="input" autocomplete="new-password" />
-						{/if}
+						<input id="r-pw" type={showRegPw ? 'text' : 'password'} bind:value={regPassword}
+							placeholder="パスワードを設定" class="input" autocomplete="new-password" />
 						<button type="button" class="eye-btn" on:click={() => (showRegPw = !showRegPw)} tabindex="-1">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 								{#if showRegPw}
@@ -346,11 +230,8 @@
 				</div>
 				<div class="field">
 					<label class="label" for="r-confirm">パスワード（確認）</label>
-					{#if showRegPw}
-						<input id="r-confirm" type="text"     bind:value={regConfirm} placeholder="もう一度入力" class="input" autocomplete="new-password" />
-					{:else}
-						<input id="r-confirm" type="password" bind:value={regConfirm} placeholder="もう一度入力" class="input" autocomplete="new-password" />
-					{/if}
+					<input id="r-confirm" type={showRegPw ? 'text' : 'password'} bind:value={regConfirm}
+						placeholder="もう一度入力" class="input" autocomplete="new-password" />
 				</div>
 				{#if regError}<div class="err-msg">{regError}</div>{/if}
 				<button type="submit" class="submit-btn" disabled={regLoading}>
@@ -363,12 +244,9 @@
 </div>
 
 <style>
-#recaptcha-container { display: none; }
-
 .shell {
 	min-height: 100vh;
-	display: flex;
-	flex-direction: column;
+	display: flex; flex-direction: column;
 	background: #0f172a;
 }
 .top {
@@ -392,7 +270,6 @@
 	overflow: hidden; display: flex; flex-direction: column;
 }
 
-/* タブ */
 .tabs { display: flex; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
 .tab {
 	flex: 1; padding: 16px;
@@ -403,7 +280,6 @@
 }
 .tab.active { color: #2563eb; border-bottom-color: #2563eb; }
 
-/* ソーシャルボタン */
 .social-btns { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px 0; }
 .social-btn {
 	display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -412,8 +288,6 @@
 }
 .google-btn { background: #fff; color: #0f172a; }
 .google-btn:hover { background: #f8fafc; }
-.phone-btn  { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
-.phone-btn:hover { background: #dcfce7; }
 
 .divider {
 	display: flex; align-items: center; gap: 12px;
@@ -421,34 +295,34 @@
 }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
 
-/* フォーム */
 .form { padding: 4px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .label { font-size: 13px; font-weight: 600; color: #374151; }
 .hint-label { font-size: 11px; font-weight: 400; color: #94a3b8; }
 .mono { font-family: monospace; letter-spacing: .05em; }
 
-/* OTP入力 */
-.otp-input {
-	font-size: 22px; font-weight: 700; letter-spacing: .2em;
-	text-align: center; font-family: monospace;
+.input {
+	width: 100%; padding: 12px 14px;
+	border: 1px solid #e2e8f0; border-radius: 10px;
+	background: #f8fafc; color: #0f172a;
+	font-size: 14px; box-sizing: border-box;
+	transition: border-color .15s, box-shadow .15s;
+	outline: none;
 }
+.input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
 
-/* パスワード */
 .pw-wrap { position: relative; }
 .pw-wrap .input { padding-right: 42px; }
 .eye-btn {
 	position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
 	background: none; border: none; cursor: pointer;
-	color: #94a3b8; display: flex; align-items: center;
-	padding: 0; transition: color .15s;
+	color: #94a3b8; display: flex; align-items: center; padding: 0;
+	transition: color .15s;
 }
 .eye-btn:hover { color: #475569; }
 
-/* エラー */
 .err-msg { background: #fee2e2; color: #b91c1c; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
 
-/* 送信ボタン */
 .submit-btn {
 	padding: 14px; background: #2563eb; color: #fff;
 	border: none; border-radius: 12px;
@@ -458,33 +332,7 @@
 .submit-btn:hover:not(:disabled) { background: #1d4ed8; }
 .submit-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* 電話番号画面 */
-.phone-head { padding: 20px 20px 0; }
-.back-btn {
-	background: none; border: none; color: #64748b;
-	font-size: 13px; font-weight: 600; cursor: pointer;
-	padding: 0 0 12px; display: block;
-}
-.back-btn:hover { color: #2563eb; }
-.phone-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-.phone-sub   { font-size: 13px; color: #94a3b8; margin: 0 0 4px; }
-
-/* プロフィール設定 */
-.social-profile-head { padding: 24px 20px 0; text-align: center; }
-.social-profile-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-.social-profile-sub   { font-size: 13px; color: #94a3b8; margin: 0; }
-
-/* 入力フィールド共通（グローバルスタイルで定義されている場合はこちらは不要） */
-:global(.input) {
-	width: 100%; padding: 12px 14px;
-	border: 1px solid #e2e8f0; border-radius: 10px;
-	background: #f8fafc; color: #0f172a;
-	font-size: 14px; box-sizing: border-box;
-	transition: border-color .15s, box-shadow .15s;
-	outline: none;
-}
-:global(.input:focus) {
-	border-color: #2563eb;
-	box-shadow: 0 0 0 3px rgba(37,99,235,.1);
-}
+.sp-head { padding: 24px 20px 0; text-align: center; }
+.sp-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+.sp-sub   { font-size: 13px; color: #94a3b8; margin: 0; }
 </style>
