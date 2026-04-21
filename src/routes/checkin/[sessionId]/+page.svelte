@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { members, sessions, allCheckIns, participationCounts, checkInMember, currentUserId, authReady } from '$lib/stores';
+	import { members, sessions, allCheckIns, participationCounts, checkInMember, checkOutMember, currentUserId, authReady, currentSessionId } from '$lib/stores';
+	import { goto } from '$app/navigation';
 
 	$: sid     = $page.params.sessionId;
 	$: session = $sessions.find((s) => s.id === sid);
@@ -78,6 +79,24 @@
 		return '';
 	}
 	function setGear(val: string) { gear = val as 'own' | 'rental'; }
+
+	function goHome() {
+		currentSessionId.set(sid);
+		goto('/');
+	}
+
+	let leaving = false;
+	async function leaveSession() {
+		if (!$currentUserId || leaving) return;
+		leaving = true;
+		try {
+			await checkOutMember(sid, $currentUserId);
+			currentSessionId.set(null);
+			goto('/');
+		} finally {
+			leaving = false;
+		}
+	}
 </script>
 
 <svelte:head><title>{session?.title ?? 'チェックイン'} | SabageManager</title></svelte:head>
@@ -122,6 +141,18 @@
 				{#if doneForSelf}
 					<p class="done-count">累計参加 {myCount} 回</p>
 				{/if}
+
+				<!-- アクションボタン -->
+				<div class="done-actions">
+					<button class="btn btn-primary" style="justify-content:center;flex:1" on:click={goHome}>
+						ホームへ戻る
+					</button>
+					{#if doneForSelf}
+						<button class="btn btn-danger" style="justify-content:center" on:click={leaveSession} disabled={leaving}>
+							{leaving ? '処理中…' : 'セッションを抜ける'}
+						</button>
+					{/if}
+				</div>
 			</div>
 
 		<!-- ── 自分チェックイン ── -->
@@ -308,6 +339,16 @@
 .done-name { font-size:22px; font-weight:700; color:#0f172a; margin:0 0 4px; }
 .done-msg  { font-size:13px; color:#64748b; margin:0; }
 .done-count{ font-size:12px; color:#94a3b8; margin-top:8px; }
+.done-actions { display:flex; flex-direction:column; gap:10px; width:100%; margin-top:24px; }
+.btn-danger {
+	display:flex; align-items:center; gap:6px;
+	padding:10px 18px; border-radius:10px; border:none; cursor:pointer;
+	font-size:13px; font-weight:600;
+	background:#fee2e2; color:#dc2626;
+	transition:background .15s;
+}
+.btn-danger:hover:not(:disabled) { background:#fecaca; }
+.btn-danger:disabled { opacity:.5; cursor:not-allowed; }
 
 /* self check-in */
 .self-state { padding:20px; display:flex; flex-direction:column; gap:16px; flex:1; }
