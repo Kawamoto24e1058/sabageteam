@@ -2,10 +2,12 @@
 	import '../app.css';
 	import { page } from '$app/stores';
 	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { currentUserId, authReady, currentUser, membersLoaded } from '$lib/stores';
 	import { authSignOut } from '$lib/auth';
+	import { auth } from '$lib/firebase';
+	import { onAuthStateChanged } from 'firebase/auth';
 
 	$: p = $page.url.pathname;
 	$: isCheckinPage = p.startsWith('/checkin');
@@ -13,24 +15,26 @@
 	$: isOnboarding  = p.startsWith('/onboarding');
 	$: showChrome    = !isCheckinPage && !isScanPage && !isOnboarding;
 
-	// Firebase Auth リスナーをセットアップ
+	// Firebase Auth リスナー（静的importに変更）
+	let unsubAuth: (() => void) | null = null;
 	onMount(() => {
 		if (!browser) return;
-
-		import('firebase/auth').then(({ onAuthStateChanged }) => {
-			import('$lib/firebase').then(({ auth }) => {
-				const unsub = onAuthStateChanged(auth, (user) => {
-					currentUserId.set(user?.uid ?? null);
-					authReady.set(true);
-				});
-				return unsub;
-			});
+		unsubAuth = onAuthStateChanged(auth, (user) => {
+			currentUserId.set(user?.uid ?? null);
+			authReady.set(true);
 		});
 	});
+	onDestroy(() => { unsubAuth?.(); });
 
-	// 未ログイン or プロフィール未設定 → オンボーディングへ
+	// ① 未ログイン → オンボーディングへ（authReadyが確定したらすぐ）
+	$: if ($authReady && browser && !isOnboarding && $currentUserId === null) {
+		const next = p !== '/' ? encodeURIComponent(p + $page.url.search) : '';
+		goto(next ? `/onboarding?next=${next}` : '/onboarding');
+	}
+
+	// ② ログイン済みだがメンバー未登録（Googleサインイン後に学籍番号未入力など）
 	$: if ($authReady && $membersLoaded && browser && !isOnboarding) {
-		if ($currentUserId === null || $currentUser === null) {
+		if ($currentUserId !== null && $currentUser === null) {
 			const next = p !== '/' ? encodeURIComponent(p + $page.url.search) : '';
 			goto(next ? `/onboarding?next=${next}` : '/onboarding');
 		}
