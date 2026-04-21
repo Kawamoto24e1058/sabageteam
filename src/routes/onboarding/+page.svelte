@@ -179,8 +179,11 @@
 				<div class="field">
 					<label class="label" for="l-pw">パスワード</label>
 					<div class="pw-wrap">
-						<input id="l-pw" type={showLoginPw ? 'text' : 'password'} bind:value={loginPassword}
-							placeholder="パスワードを入力" class="input" autocomplete="current-password" />
+						{#if showLoginPw}
+							<input id="l-pw" type="text"     bind:value={loginPassword} placeholder="パスワードを入力" class="input" autocomplete="current-password" />
+						{:else}
+							<input id="l-pw" type="password" bind:value={loginPassword} placeholder="パスワードを入力" class="input" autocomplete="current-password" />
+						{/if}
 						<button type="button" class="eye-btn" on:click={() => (showLoginPw = !showLoginPw)} tabindex="-1">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 								{#if showLoginPw}
@@ -215,8 +218,11 @@
 				<div class="field">
 					<label class="label" for="r-pw">パスワード <span class="hint-label">（6文字以上）</span></label>
 					<div class="pw-wrap">
-						<input id="r-pw" type={showRegPw ? 'text' : 'password'} bind:value={regPassword}
-							placeholder="パスワードを設定" class="input" autocomplete="new-password" />
+						{#if showRegPw}
+							<input id="r-pw" type="text"     bind:value={regPassword} placeholder="パスワードを設定" class="input" autocomplete="new-password" />
+						{:else}
+							<input id="r-pw" type="password" bind:value={regPassword} placeholder="パスワードを設定" class="input" autocomplete="new-password" />
+						{/if}
 						<button type="button" class="eye-btn" on:click={() => (showRegPw = !showRegPw)} tabindex="-1">
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 								{#if showRegPw}
@@ -230,8 +236,11 @@
 				</div>
 				<div class="field">
 					<label class="label" for="r-confirm">パスワード（確認）</label>
-					<input id="r-confirm" type={showRegPw ? 'text' : 'password'} bind:value={regConfirm}
-						placeholder="もう一度入力" class="input" autocomplete="new-password" />
+					{#if showRegPw}
+						<input id="r-confirm" type="text"     bind:value={regConfirm} placeholder="もう一度入力" class="input" autocomplete="new-password" />
+					{:else}
+						<input id="r-confirm" type="password" bind:value={regConfirm} placeholder="もう一度入力" class="input" autocomplete="new-password" />
+					{/if}
 				</div>
 				{#if regError}<div class="err-msg">{regError}</div>{/if}
 				<button type="submit" class="submit-btn" disabled={regLoading}>
