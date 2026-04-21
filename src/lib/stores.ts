@@ -44,21 +44,19 @@ export const currentUserId = writable<string | null>(null);
 export const authReady     = writable(false);
 
 // ============================================================
-// 認証確定後に Firestore リスナーを起動（タイミング問題を防ぐ）
+// 認証確定後に Firestore リスナーを起動／サインアウト時に停止
 // ============================================================
 
 if (browser) {
-	let listenersStarted = false;
+	// Firestore リスナーの解除関数を保持
+	let unsubFirestore: Array<() => void> = [];
 
-	onAuthStateChanged(auth, (user) => {
-		// Auth 状態をストアに反映
-		currentUserId.set(user?.uid ?? null);
-		authReady.set(true);
+	function startFirestoreListeners() {
+		// 既存リスナーをまず全解除（二重起動防止）
+		unsubFirestore.forEach((fn) => fn());
+		unsubFirestore = [];
 
-		if (user && !listenersStarted) {
-			// 認証済みが確定してから Firestore を購読開始
-			listenersStarted = true;
-
+		unsubFirestore.push(
 			onSnapshot(
 				collection(db, 'members'),
 				(snap) => {
@@ -66,16 +64,41 @@ if (browser) {
 					membersLoaded.set(true);
 				},
 				(_err) => { membersLoaded.set(true); }
-			);
+			)
+		);
+		unsubFirestore.push(
 			onSnapshot(collection(db, 'sessions'), (snap) => {
 				sessions.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Session)));
-			});
+			})
+		);
+		unsubFirestore.push(
 			onSnapshot(collection(db, 'checkins'), (snap) => {
 				allCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
-			});
-		} else if (!user) {
-			// 未ログインの場合もフラグを立てて onboarding リダイレクトを動かす
-			membersLoaded.set(true);
+			})
+		);
+	}
+
+	function stopFirestoreListeners() {
+		// リスナー解除 → ストアをリセット
+		unsubFirestore.forEach((fn) => fn());
+		unsubFirestore = [];
+		members.set([]);
+		sessions.set([]);
+		allCheckIns.set([]);
+		membersLoaded.set(false);
+	}
+
+	onAuthStateChanged(auth, (user) => {
+		currentUserId.set(user?.uid ?? null);
+		authReady.set(true);
+
+		if (user) {
+			// ログイン時：リスナー開始
+			startFirestoreListeners();
+		} else {
+			// ログアウト時：リスナー停止＆ストアクリア
+			stopFirestoreListeners();
+			membersLoaded.set(true); // onboarding へのリダイレクトを動かす
 		}
 	});
 }
