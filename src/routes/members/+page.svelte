@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { members, participationCounts, deleteMember } from '$lib/stores';
 	import { goto } from '$app/navigation';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 
 	let query = '';
 	$: filtered = query.trim()
@@ -13,9 +14,19 @@
 		return '';
 	}
 
-	async function remove(id: string) {
-		if (!confirm('このメンバーを削除しますか？')) return;
-		await deleteMember(id);
+	let deleteTargetId: string | null = null;
+	let deleteTargetName = '';
+	let deleteConfirmOpen = false;
+
+	function askRemove(id: string, name: string) {
+		deleteTargetId   = id;
+		deleteTargetName = name;
+		deleteConfirmOpen = true;
+	}
+	async function doRemove() {
+		if (!deleteTargetId) return;
+		await deleteMember(deleteTargetId);
+		deleteTargetId = null;
 	}
 </script>
 
@@ -66,7 +77,7 @@
 							<span>参加 {count} 回</span>
 						</div>
 					</div>
-					<button class="del-btn" on:click={() => remove(member.id)} title="削除">
+					<button class="del-btn" on:click={() => askRemove(member.id, member.name)} title="削除">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 							<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 						</svg>
@@ -76,6 +87,15 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmModal
+	bind:open={deleteConfirmOpen}
+	title="メンバーを削除"
+	message="{deleteTargetName} を削除します。この操作は取り消せません。"
+	confirmLabel="削除する"
+	danger={true}
+	on:confirm={doRemove}
+/>
 
 <style>
 .page { display:flex; flex-direction:column; gap:12px; }

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { currentSessionId, mySessions, allCheckIns, currentUserId, deleteSession } from '$lib/stores';
 	import { goto } from '$app/navigation';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 
 	function formatDate(d: string) {
 		return new Date(d).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', weekday: 'short' });
@@ -9,10 +10,19 @@
 		return $allCheckIns.filter((ci) => ci.sessionId === id).length;
 	}
 	function select(id: string) { currentSessionId.set(id); goto('/'); }
-	async function remove(id: string) {
-		if (!confirm('このセッションを削除しますか？')) return;
-		await deleteSession(id);
-		if ($currentSessionId === id) currentSessionId.set(null);
+
+	let deleteTargetId: string | null = null;
+	let deleteConfirmOpen = false;
+
+	function askRemove(id: string) {
+		deleteTargetId = id;
+		deleteConfirmOpen = true;
+	}
+	async function doRemove() {
+		if (!deleteTargetId) return;
+		await deleteSession(deleteTargetId);
+		if ($currentSessionId === deleteTargetId) currentSessionId.set(null);
+		deleteTargetId = null;
 	}
 	// 自分が作成 or 参加したセッションを新しい順に表示（mySessions は already sorted）
 	$: sorted = $mySessions;
@@ -70,7 +80,7 @@
 									<button class="btn btn-secondary" style="font-size:12px;padding:5px 10px" on:click={() => goto('/')}>ホームへ</button>
 								{/if}
 							{/if}
-							<button class="del-btn" on:click={() => remove(s.id)}>
+							<button class="del-btn" on:click={() => askRemove(s.id)}>
 								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 									<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 								</svg>
@@ -82,6 +92,15 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmModal
+	bind:open={deleteConfirmOpen}
+	title="セッションを削除"
+	message="このセッションを完全に削除します。この操作は取り消せません。"
+	confirmLabel="削除する"
+	danger={true}
+	on:confirm={doRemove}
+/>
 
 <style>
 .page { display:flex; flex-direction:column; gap:12px; }

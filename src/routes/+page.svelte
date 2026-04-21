@@ -12,6 +12,7 @@
 	import type { TeamMember, GearType } from '$lib/types';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 
 	let isAssigning = false;
 
@@ -87,15 +88,15 @@
 
 	// ── セッション終了（作成者のみ） ────────────────────────
 	let ending = false;
-	async function endSession() {
+	let endConfirmOpen = false;
+
+	async function doEndSession() {
 		if (!$currentSessionId || !isCreator || ending) return;
-		if (!confirm('セッションを終了しますか？\n全員がチェックアウトされます。')) return;
 		ending = true;
 		try {
 			const sid = $currentSessionId;
 			const memberIds = $currentCheckIns.map(ci => ci.memberId);
 			currentSessionId.set(null);
-			// チーム結果は履歴として保持したまま全員チェックアウト＆ステータス更新
 			await endSessionFirestore(sid, memberIds);
 		} finally {
 			ending = false;
@@ -396,7 +397,7 @@
 		</div>
 
 		<!-- セッション終了ボタン（作成者のみ） -->
-		<button class="end-session-btn" disabled={ending} on:click={endSession}>
+		<button class="end-session-btn" disabled={ending} on:click={() => endConfirmOpen = true}>
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 				<rect x="3" y="3" width="18" height="18" rx="2"/>
 				<line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
@@ -482,6 +483,16 @@
 	{/if}
 </div>
 {/if}
+
+<!-- セッション終了確認モーダル -->
+<ConfirmModal
+	bind:open={endConfirmOpen}
+	title="セッションを終了する"
+	message="全員がチェックアウトされます。セッションは履歴として残ります。"
+	confirmLabel="終了する"
+	danger={true}
+	on:confirm={doEndSession}
+/>
 
 <style>
 .page { display:flex; flex-direction:column; gap:12px; }
