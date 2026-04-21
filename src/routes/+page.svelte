@@ -2,45 +2,30 @@
 	import {
 		members, currentSession, currentSessionId,
 		currentCheckIns, currentCheckedInCount, currentOwnGearCount, currentRentalGearCount,
-		currentTeamResult, participationCounts, teamResults, numTeams,
-		currentUser, currentUserId, mySessions, myCheckIns,
-		checkInMember, checkOutMember, authReady
+		currentTeamResult, participationCounts, numTeams,
+		currentUser, currentUserId, myParticipatedSessions, myCheckIns,
+		checkInMember, checkOutMember, saveTeamResult, clearTeamResult
 	} from '$lib/stores';
 	import { assignTeams } from '$lib/teamAssignment';
 	import { TEAM_CONFIGS } from '$lib/teamColors';
-	import type { TeamMember, TeamResult, GearType } from '$lib/types';
+	import type { TeamMember, GearType } from '$lib/types';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
 
 	let isAssigning = false;
-
-	// 旧フォーマット（{red,yellow}）の残存データをクリア
-	onMount(() => {
-		if (!browser) return;
-		teamResults.update((stored) => {
-			const cleaned: Record<string, TeamResult> = {};
-			for (const [k, v] of Object.entries(stored)) {
-				if (v && Array.isArray((v as unknown as { slots?: unknown }).slots)) {
-					cleaned[k] = v as TeamResult;
-				}
-			}
-			return cleaned;
-		});
-	});
 
 	async function runAssignment() {
 		if (!$currentSessionId) return;
 		isAssigning = true;
 		await new Promise((r) => setTimeout(r, 350));
 		const result = assignTeams($members, $currentCheckIns, $participationCounts, $numTeams);
-		teamResults.update((r) => ({ ...r, [$currentSessionId!]: result }));
+		await saveTeamResult($currentSessionId, result);
 		isAssigning = false;
 	}
 
-	function resetResult() {
+	async function resetResult() {
 		if (!$currentSessionId) return;
-		teamResults.update((r) => { const u = { ...r }; delete u[$currentSessionId!]; return u; });
+		await clearTeamResult($currentSessionId);
 	}
 
 	$: checkinUrl = browser && $currentSessionId
@@ -158,11 +143,11 @@
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
 	</button>
 
-	<!-- 自分の参加セッション -->
-	{#if $mySessions.length > 0}
+	<!-- 参加履歴（チェックインしたセッションのみ） -->
+	{#if $myParticipatedSessions.length > 0}
 		<div class="list-section">
-			<div class="section-title">参加したイベント</div>
-			{#each $mySessions.slice(0, 5) as s}
+			<div class="section-title">参加履歴</div>
+			{#each $myParticipatedSessions.slice(0, 8) as s}
 				{@const myCi = $myCheckIns.find(ci => ci.sessionId === s.id)}
 				<button class="row-item" on:click={() => { currentSessionId.set(s.id); }}>
 					<div class="row-icon">

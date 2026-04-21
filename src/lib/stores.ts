@@ -25,16 +25,17 @@ function persist<T>(key: string, initial: T) {
 // ============================================================
 
 export const currentSessionId = persist<string | null>('sm_current_session', null);
-export const teamResults      = persist<Record<string, TeamResult>>('sm_team_results', {});
 export const numTeams         = persist<number>('sm_num_teams', 2);
 
 // ============================================================
 // Firestore リアルタイム共有ストア
 // ============================================================
 
-export const members     = writable<Member[]>([]);
-export const sessions    = writable<Session[]>([]);
-export const allCheckIns = writable<CheckIn[]>([]);
+export const members          = writable<Member[]>([]);
+export const sessions         = writable<Session[]>([]);
+export const allCheckIns      = writable<CheckIn[]>([]);
+// チーム分け結果（Firestore共有 → 参加者も閲覧可能）
+export const teamResultsStore = writable<Record<string, TeamResult>>({});
 
 // データ読み込み完了フラグ
 export const membersLoaded = writable(false);
@@ -76,6 +77,13 @@ if (browser) {
 				allCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
 			})
 		);
+		unsubFirestore.push(
+			onSnapshot(collection(db, 'teamResults'), (snap) => {
+				const map: Record<string, TeamResult> = {};
+				for (const d of snap.docs) map[d.id] = d.data() as TeamResult;
+				teamResultsStore.set(map);
+			})
+		);
 	}
 
 	function stopFirestoreListeners() {
@@ -85,6 +93,7 @@ if (browser) {
 		members.set([]);
 		sessions.set([]);
 		allCheckIns.set([]);
+		teamResultsStore.set({});
 		membersLoaded.set(false);
 	}
 
@@ -129,7 +138,7 @@ export const currentOwnGearCount    = derived(currentCheckIns, ($c) => $c.filter
 export const currentRentalGearCount = derived(currentCheckIns, ($c) => $c.filter((ci) => ci.gearType === 'rental').length);
 
 export const currentTeamResult = derived(
-	[teamResults, currentSessionId],
+	[teamResultsStore, currentSessionId],
 	([$r, $id]) => ($id ? ($r[$id] ?? null) : null)
 );
 
@@ -145,13 +154,20 @@ export const myCheckIns = derived(
 
 export const mySessionIds = derived(myCheckIns, ($my) => new Set($my.map((ci) => ci.sessionId)));
 
-// 参加済み OR 自分が作成したセッション（両方を含む）
+// 参加済み OR 自分が作成したセッション（セッション一覧ページ用）
 export const mySessions = derived(
 	[sessions, mySessionIds, currentUserId],
 	([$s, $ids, $uid]) =>
 		$s
 			.filter((s) => $ids.has(s.id) || (!!$uid && s.createdBy === $uid))
 			.sort((a, b) => b.date.localeCompare(a.date))
+);
+
+// 自分がチェックインしたセッションのみ（ホーム履歴リスト用）
+export const myParticipatedSessions = derived(
+	[sessions, mySessionIds],
+	([$s, $ids]) =>
+		$s.filter((s) => $ids.has(s.id)).sort((a, b) => b.date.localeCompare(a.date))
 );
 
 // ============================================================
@@ -192,10 +208,20 @@ export async function checkInMember(
 		id, memberId, sessionId, gearType,
 		checkedInAt: new Date().toISOString()
 	});
-	teamResults.update((r) => { const u = { ...r }; delete u[sessionId]; return u; });
+	// チェックイン変更時はチーム結果をクリア
+	clearTeamResult(sessionId).catch(() => {});
 }
 
 export async function checkOutMember(sessionId: string, memberId: string): Promise<void> {
 	await deleteDoc(doc(db, 'checkins', `${sessionId}_${memberId}`));
-	teamResults.update((r) => { const u = { ...r }; delete u[sessionId]; return u; });
+	clearTeamResult(sessionId).catch(() => {});
+}
+
+// ── チーム結果 CRUD ─────────────────────────────────────────
+export async function saveTeamResult(sessionId: string, result: TeamResult): Promise<void> {
+	await setDoc(doc(db, 'teamResults', sessionId), result);
+}
+
+export async function clearTeamResult(sessionId: string): Promise<void> {
+	await deleteDoc(doc(db, 'teamResults', sessionId));
 }
