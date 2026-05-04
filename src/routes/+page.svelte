@@ -106,8 +106,14 @@
 	// チェックイン済みメンバーIDセット
 	$: checkedInIds = new Set($currentCheckIns.map(ci => ci.memberId));
 
-	// 管理パネルの開閉
-	let adminOpen = false;
+	// 手動追加パネルの開閉・検索
+	let adminOpen  = false;
+	let adminQuery = '';
+	$: adminFiltered = adminQuery.trim()
+		? $members.filter(m =>
+			m.name.includes(adminQuery) ||
+			m.studentId.toLowerCase().includes(adminQuery.toLowerCase()))
+		: $members;
 
 	// 選択中の装備タイプ（メンバーごと）
 	let gearSelections: Record<string, GearType> = {};
@@ -308,63 +314,90 @@
 			{/if}
 		</div>
 
-		<!-- チェックイン管理パネル -->
-		<div class="card admin-panel">
-			<button class="admin-toggle" on:click={() => (adminOpen = !adminOpen)}>
-				<div class="admin-toggle-left">
-					<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-						<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-						<circle cx="9" cy="7" r="4"/>
-						<path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-					</svg>
-					<span>メンバーをチェックイン</span>
-					<span class="admin-count">{$currentCheckedInCount}/{$members.length}</span>
-				</div>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"
-					style="transition:transform .2s; transform:rotate({adminOpen ? 180 : 0}deg)">
-					<polyline points="6 9 12 15 18 9"/>
-				</svg>
-			</button>
-			{#if adminOpen}
-				<div class="admin-list">
-					{#each $members as m (m.id)}
-						{@const checked = checkedInIds.has(m.id)}
-						{@const loading = ciLoading[m.id] ?? false}
-						<div class="admin-row" class:admin-row-checked={checked}>
-							<div class="admin-member">
-								<div class="admin-avatar" class:admin-avatar-checked={checked}>
-									{m.name.slice(0, 1)}
+		<!-- 参加メンバー一覧（セッション参加者のみ） -->
+		<div class="card">
+			<div class="section-header">
+				<div class="section-title">参加メンバー</div>
+				<span class="member-count-badge">{$currentCheckedInCount}名</span>
+			</div>
+			{#if $currentCheckedInCount === 0}
+				<p class="empty-members">まだ参加者がいません。QRコードを共有しましょう。</p>
+			{:else}
+				<div class="ci-member-list">
+					{#each $currentCheckIns as ci (ci.id)}
+						{@const m = $members.find(x => x.id === ci.memberId)}
+						{@const loading = ciLoading[ci.memberId] ?? false}
+						{#if m}
+							<div class="ci-row" class:ci-row-me={ci.memberId === $currentUserId}>
+								<div class="ci-avatar">{m.name[0]}</div>
+								<div class="ci-info">
+									<span class="ci-name">{m.name}{ci.memberId === $currentUserId ? ' (自分)' : ''}</span>
+									<span class="ci-sid">{m.studentId}</span>
 								</div>
-								<div class="admin-name-wrap">
-									<span class="admin-name">{m.name}</span>
-									<span class="admin-sid">{m.studentId}</span>
-								</div>
+								<span class="gear-badge-sm {ci.gearType === 'own' ? 'gear-own-sm' : 'gear-rental-sm'}">
+									{ci.gearType === 'own' ? '自前' : 'レンタル'}
+								</span>
+								<button class="ci-out-btn" disabled={loading} on:click={() => toggleCheckIn(ci.memberId)}
+									title="取り消す">
+									{#if loading}
+										<svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9" stroke-dasharray="40" stroke-dashoffset="10"/></svg>
+									{:else}
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+									{/if}
+								</button>
 							</div>
-							{#if !checked}
-								<div class="admin-gear-row">
-									<button class="gear-mini" class:gear-mini-active={getGear(m.id) === 'own'}
-										on:click={() => { gearSelections[m.id] = 'own'; gearSelections = {...gearSelections}; }}>自前</button>
-									<button class="gear-mini" class:gear-mini-active={getGear(m.id) === 'rental'}
-										on:click={() => { gearSelections[m.id] = 'rental'; gearSelections = {...gearSelections}; }}>レンタル</button>
-									<button class="ci-btn ci-btn-in" disabled={loading} on:click={() => toggleCheckIn(m.id)}>
-										{#if loading}…{:else}参加{/if}
-									</button>
-								</div>
-							{:else}
-								{@const ci = $currentCheckIns.find(c => c.memberId === m.id)}
-								<div class="admin-gear-row">
-									<span class="gear-badge-sm {ci?.gearType === 'own' ? 'gear-own-sm' : 'gear-rental-sm'}">
-										{ci?.gearType === 'own' ? '自前' : 'レンタル'}
-									</span>
-									<button class="ci-btn ci-btn-out" disabled={loading} on:click={() => toggleCheckIn(m.id)}>
-										{#if loading}…{:else}取消{/if}
-									</button>
-								</div>
-							{/if}
-						</div>
+						{/if}
 					{/each}
 				</div>
 			{/if}
+
+			<!-- 手動追加パネル（折りたたみ） -->
+			<div class="add-panel">
+				<button class="add-toggle" on:click={() => (adminOpen = !adminOpen)}>
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+						<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+					</svg>
+					手動でメンバーを追加
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"
+						style="margin-left:auto;transition:transform .15s;transform:rotate({adminOpen ? 180 : 0}deg)">
+						<polyline points="6 9 12 15 18 9"/>
+					</svg>
+				</button>
+				{#if adminOpen}
+					<div class="add-body">
+						<input type="search" bind:value={adminQuery} placeholder="名前・学籍番号で検索" class="add-search" />
+						<div class="add-list">
+							{#each adminFiltered as m (m.id)}
+								{@const checked = checkedInIds.has(m.id)}
+								{@const loading = ciLoading[m.id] ?? false}
+								{#if !checked}
+									<div class="add-row">
+										<div class="add-avatar">{m.name[0]}</div>
+										<div class="add-name-wrap">
+											<span class="add-name">{m.name}</span>
+											<span class="add-sid">{m.studentId}</span>
+										</div>
+										<div class="admin-gear-row">
+											<button class="gear-mini" class:gear-mini-active={getGear(m.id) === 'own'}
+												on:click={() => { gearSelections[m.id] = 'own'; gearSelections = {...gearSelections}; }}>自前</button>
+											<button class="gear-mini" class:gear-mini-active={getGear(m.id) === 'rental'}
+												on:click={() => { gearSelections[m.id] = 'rental'; gearSelections = {...gearSelections}; }}>レンタル</button>
+											<button class="ci-btn ci-btn-in" disabled={loading} on:click={() => toggleCheckIn(m.id)}>
+												{loading ? '…' : '追加'}
+											</button>
+										</div>
+									</div>
+								{/if}
+							{/each}
+							{#if adminFiltered.filter(m => !checkedInIds.has(m.id)).length === 0}
+								<p class="add-empty">
+									{adminQuery ? '一致するメンバーがいません' : '全員が参加済みです'}
+								</p>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<!-- チーム分けボタン -->
@@ -693,39 +726,79 @@
 }
 .legend-grid span:nth-child(even) { font-weight:700; color:#0f172a; text-align:right; }
 
-/* ── 管理パネル ──────────────────────────── */
-.admin-panel { padding:0; overflow:hidden; }
-
-.admin-toggle {
-	display:flex; align-items:center; justify-content:space-between;
-	background:none; border:none; cursor:pointer; width:100%;
-	padding:14px 16px;
-}
-.admin-toggle-left { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; color:#0f172a; }
-.admin-count {
-	background:#f1f5f9; color:#64748b;
-	font-size:11px; font-weight:700;
-	padding:2px 7px; border-radius:99px;
+/* ── 参加メンバーリスト ──────────────────── */
+.section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.member-count-badge {
+	font-size:11px; font-weight:700; color:#2563eb;
+	background:#eff6ff; padding:2px 9px; border-radius:99px;
 }
 
-.admin-list { border-top:1px solid #f1f5f9; }
-.admin-row {
-	display:flex; align-items:center; justify-content:space-between;
-	padding:10px 16px; gap:8px;
-	border-bottom:1px solid #f8fafc;
-	transition:background .12s;
-}
-.admin-row:last-child { border-bottom:none; }
-.admin-row-checked { background:#f0fdf4; }
+.empty-members { font-size:12px; color:#94a3b8; text-align:center; padding:12px 0 4px; margin:0; }
 
-.admin-member { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
-.admin-avatar {
+.ci-member-list { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+.ci-row {
+	display:flex; align-items:center; gap:10px;
+	padding:8px 10px; border-radius:10px;
+	background:#f8fafc;
+}
+.ci-row.ci-row-me { background:#eff6ff; }
+.ci-avatar {
 	width:34px; height:34px; border-radius:9px;
-	background:#f1f5f9; color:#64748b;
+	background:#e2e8f0; color:#475569;
 	display:flex; align-items:center; justify-content:center;
 	font-size:13px; font-weight:700; flex-shrink:0;
 }
-.admin-avatar-checked { background:#dcfce7; color:#16a34a; }
+.ci-row-me .ci-avatar { background:#dbeafe; color:#1d4ed8; }
+.ci-info { flex:1; min-width:0; }
+.ci-name { display:block; font-size:13px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ci-sid  { display:block; font-size:10px; color:#94a3b8; }
+.ci-out-btn {
+	width:26px; height:26px; border-radius:7px; border:none;
+	background:#f1f5f9; color:#94a3b8; cursor:pointer;
+	display:flex; align-items:center; justify-content:center;
+	flex-shrink:0; transition:background .12s, color .12s;
+}
+.ci-out-btn:hover:not(:disabled) { background:#fee2e2; color:#ef4444; }
+.ci-out-btn:disabled { opacity:.5; cursor:not-allowed; }
+.spin { animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* 手動追加パネル */
+.add-panel { border-top:1px solid #f1f5f9; margin-top:4px; }
+.add-toggle {
+	display:flex; align-items:center; gap:7px;
+	width:100%; background:none; border:none; cursor:pointer;
+	padding:10px 2px 2px;
+	font-size:12px; font-weight:600; color:#64748b;
+	transition:color .12s;
+}
+.add-toggle:hover { color:#2563eb; }
+.add-body { padding-top:10px; display:flex; flex-direction:column; gap:8px; }
+.add-search {
+	width:100%; padding:9px 12px; border:1px solid #e2e8f0;
+	border-radius:9px; background:#f8fafc; font-size:13px;
+	color:#0f172a; box-sizing:border-box; outline:none;
+	transition:border-color .12s;
+}
+.add-search:focus { border-color:#2563eb; }
+.add-list { display:flex; flex-direction:column; gap:2px; max-height:200px; overflow-y:auto; }
+.add-row {
+	display:flex; align-items:center; gap:8px;
+	padding:8px 4px; border-bottom:1px solid #f8fafc;
+}
+.add-row:last-child { border-bottom:none; }
+.add-avatar {
+	width:30px; height:30px; border-radius:8px;
+	background:#f1f5f9; color:#64748b;
+	display:flex; align-items:center; justify-content:center;
+	font-size:12px; font-weight:700; flex-shrink:0;
+}
+.add-name-wrap { flex:1; min-width:0; }
+.add-name { display:block; font-size:12px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.add-sid  { display:block; font-size:10px; color:#94a3b8; }
+.add-empty { font-size:12px; color:#94a3b8; text-align:center; padding:12px 0; margin:0; }
+
+/* 旧 admin ─ gear-row はそのまま流用 */
 .admin-name-wrap { display:flex; flex-direction:column; min-width:0; }
 .admin-name { font-size:13px; font-weight:600; color:#0f172a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .admin-sid  { font-size:11px; color:#94a3b8; }
