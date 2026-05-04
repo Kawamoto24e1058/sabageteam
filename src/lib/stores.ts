@@ -4,7 +4,7 @@ import type { Member, Session, CheckIn, TeamResult } from './types';
 import { db, auth } from './firebase';
 import {
 	collection, doc, setDoc, deleteDoc, onSnapshot,
-	writeBatch, updateDoc
+	writeBatch, updateDoc, query, where
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -35,6 +35,8 @@ export const numTeams         = persist<number>('sm_num_teams', 2);
 export const members          = writable<Member[]>([]);
 export const sessions         = writable<Session[]>([]);
 export const allCheckIns      = writable<CheckIn[]>([]);
+// currentCheckIns：現在選択中セッション専用（Firestore query で更新）
+export const currentCheckIns  = writable<CheckIn[]>([]);
 // チーム分け結果（Firestore共有 → 参加者も閲覧可能）
 export const teamResultsStore = writable<Record<string, TeamResult>>({});
 
@@ -48,6 +50,19 @@ export const authReady     = writable(false);
 // ============================================================
 // 認証確定後に Firestore リスナーを起動／サインアウト時に停止
 // ============================================================
+
+// セッション専用チェックインリスナー（モジュールスコープ）
+let unsubSessionCI: (() => void) | null = null;
+
+function resubscribeSessionCI(sessionId: string | null) {
+	if (unsubSessionCI) { unsubSessionCI(); unsubSessionCI = null; }
+	currentCheckIns.set([]);
+	if (!sessionId) return;
+	const q = query(collection(db, 'checkins'), where('sessionId', '==', sessionId));
+	unsubSessionCI = onSnapshot(q, (snap) => {
+		currentCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
+	});
+}
 
 if (browser) {
 	// Firestore リスナーの解除関数を保持
@@ -73,6 +88,7 @@ if (browser) {
 				sessions.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Session)));
 			})
 		);
+		// allCheckIns は participationCounts・myCheckIns 用（全セッション分）
 		unsubFirestore.push(
 			onSnapshot(collection(db, 'checkins'), (snap) => {
 				allCheckIns.set(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CheckIn)));
@@ -85,15 +101,21 @@ if (browser) {
 				teamResultsStore.set(map);
 			})
 		);
+
+		// currentSessionId が変わるたびにセッション専用チェックインを再取得
+		const unsubSidForCI = currentSessionId.subscribe(resubscribeSessionCI);
+		unsubFirestore.push(unsubSidForCI);
 	}
 
 	function stopFirestoreListeners() {
 		// リスナー解除 → ストアをリセット
 		unsubFirestore.forEach((fn) => fn());
 		unsubFirestore = [];
+		if (unsubSessionCI) { unsubSessionCI(); unsubSessionCI = null; }
 		members.set([]);
 		sessions.set([]);
 		allCheckIns.set([]);
+		currentCheckIns.set([]);
 		teamResultsStore.set({});
 		membersLoaded.set(false);
 	}
@@ -120,11 +142,6 @@ if (browser) {
 export const currentSession = derived(
 	[sessions, currentSessionId],
 	([$s, $id]) => $s.find((s) => s.id === $id) ?? null
-);
-
-export const currentCheckIns = derived(
-	[allCheckIns, currentSessionId],
-	([$all, $id]) => ($id ? $all.filter((ci) => ci.sessionId === $id) : [])
 );
 
 export const participationCounts = derived(allCheckIns, ($all) => {
